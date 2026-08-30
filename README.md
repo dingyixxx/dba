@@ -4,7 +4,7 @@
 
 # 其他一些数据库方面的经典错误案例
 
-## rr没有解决幻读
+## rr没有解决幻读（幻读固然需要解决,但是应尽量避免在一个事务里,让写语句像"夹心饼干"的利一样\夹在两条"一模一样"的奥奥中间,解决问题并不高明,造成幻读的这种写法本不应该被提倡)
 <video src="https://github.com/user-attachments/assets/639875d6-2edf-44df-a20e-d197644cb5e3" controls width="800">
 </video>
 
