@@ -57,3 +57,5 @@ private void setHead(Node node) {
         node.prev = null;
     }
 只要不是当前节点head,就会把thread包装入队.
+
+- 9.LockSupport.park(this);
