@@ -58,4 +58,4 @@ private void setHead(Node node) {
     }
 只要不是当前节点head,就会把thread包装入队.
 
-- 9.LockSupport.park(this);
+- 9.LockSupport.park(this);中断信号在锁获取过程中被“延迟处理”，而不是被忽略。虽迟但到.
