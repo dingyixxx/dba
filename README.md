@@ -59,3 +59,7 @@ private void setHead(Node node) {
 只要不是当前节点head,就会把thread包装入队.
 
 - 9.LockSupport.park(this);中断信号在锁获取过程中被“延迟处理”，而不是被忽略。虽迟但到.
+- 10.if (ws < 0)
+            compareAndSetWaitStatus(node, ws, 0); 相当乐观, SIGNAL能清就清, 别人已经清了SIGNAL或者新入队的节点说"要等我唤醒于是又把我标记为了SIGNAL", 那也没关系尽力而为
+- 11.tryAcquireNanos的tryAcquire用短路, acquireInterruptibly的用分支...
+- 12.FairSync的tryAcquire和nonfairTryAcquire的包含的通用方法, 也不抽出来...
