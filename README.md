@@ -60,6 +60,11 @@ private void setHead(Node node) {
 
 - 9.LockSupport.park(this);中断信号在锁获取过程中被“延迟处理”，而不是被忽略。虽迟但到.
 - 10.if (ws < 0)
-            compareAndSetWaitStatus(node, ws, 0); 相当乐观, SIGNAL能清就清, 别人已经清了SIGNAL或者新入队的节点说"要等我唤醒于是又把我标记为了SIGNAL", 那也没关系尽力而为
+            compareAndSetWaitStatus(node, ws, 0); 相当乐观, SIGNAL能清就清, 别人已经清了SIGNAL 或者 新入队的节点明确说要等我唤醒于是又把我标记为了SIGNAL, 那也没关系, 尽力而为
 - 11.tryAcquireNanos的tryAcquire用短路, acquireInterruptibly的用分支...
 - 12.FairSync的tryAcquire和nonfairTryAcquire的包含的通用方法, 也不抽出来...
+- 13.偏向锁撤销是很麻烦的, 所以它要延迟开启.
+- 14.匿名偏向 -> 带有线程id的偏向.
+- 15.bulk revoke 该类的其他某对象.
+- 16.bulk rebias 该类超过撤销阈值, 后续跳过偏向\直接升级为轻量级锁.
+- 17.
