@@ -67,4 +67,10 @@ private void setHead(Node node) {
 - 14.匿名偏向 -> 带有线程id的偏向.
 - 15.bulk revoke 该类的其他某对象.
 - 16.bulk rebias 该类超过撤销阈值, 后续跳过偏向\直接升级为轻量级锁.
-- 17.
+
+## ThreadPoolExecutor
+- 1. Are workers subject to culling?
+- 2. 怎么样先增加到max workers, 再加任务到workQueue? -> make offer return false(假满) 然后等worker加到极限了再realOffer入队
+- 3. 怎样不拒绝任务入队? 重写offer, 里面调用put阻塞
+- 4. 滑动窗口最大值的恐怖
+- 5. 围圈报数的恐怖
