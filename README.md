@@ -75,3 +75,18 @@ private void setHead(Node node) {
 - 3. 怎样不拒绝任务入队? 重写offer, 里面调用put阻塞
 - 4. 滑动窗口最大值的恐怖
 - 5. 围圈报数的恐怖
+
+- x. addWorker如果走到addWorkerFailed(w) 
+-> tryTerminate(); 
+-> interruptIdleWorkers(ONLY_ONE) 
+-> if (!t.isInterrupted() && w.tryLock())就中断线程t.interrupt();
+-> getTask里的 workQueue.take() 响应中断, 使得其返回null
+-> runWorker的 
+while死循环条件 “(task = getTask()) != null”
+被“getTask()返回null”打破, 
+任务执行完,
+走到completedAbruptly = false;
+-> finally块走到 processWorkerExit(w, completedAbruptly); 第二个参数传入false
+-> 继续走到 tryTerminate();循环往复
+
+terminate workers one by one to avoid concurrency...
