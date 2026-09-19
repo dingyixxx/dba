@@ -25,6 +25,24 @@
 <video src="https://github.com/user-attachments/assets/f5919505-905a-437b-8013-196456476f1d" controls width="800">
 </video>
 
+
+## They think alike
+
+### 《奇异博士》— 古一法师
+
+> 死亡赋予生命意义，让你知道时光短暂，去日无多。
+> Death is what gives life meaning, to know your days are numbered, your time is short.
+
+> 你以为我准备好迎接死亡了吗？
+> You'd think, after all, this time I'd be ready.
+
+> 但你会发现。我多么想无限延长这一时刻的光阴，从而欣赏这美丽的雪景。
+> But look at me, stretching one moment out into a thousand, just so I can watch the snow.
+
+### 《赤壁赋》— 苏轼
+
+> 寄蜉蝣于天地，渺沧海之一粟。
+
 # 源码赏析
 ## AQS
 - 1.addWaiter为什么要把enq(node)单独拆出来一个方法,是为了优先处理一次大多数的pred不为null的场景吗?感觉代码风格像个do...while...
@@ -124,19 +142,3 @@ addWorker才能走下去
 
 
 
-## They think alike
-
-### 《奇异博士》— 古一法师
-
-> 死亡赋予生命意义，让你知道时光短暂，去日无多。
-> Death is what gives life meaning, to know your days are numbered, your time is short.
-
-> 你以为我准备好迎接死亡了吗？
-> You'd think, after all, this time I'd be ready.
-
-> 但你会发现。我多么想无限延长这一时刻的光阴，从而欣赏这美丽的雪景。
-> But look at me, stretching one moment out into a thousand, just so I can watch the snow.
-
-### 《赤壁赋》— 苏轼
-
-> 寄蜉蝣于天地，渺沧海之一粟。
