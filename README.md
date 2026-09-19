@@ -69,6 +69,10 @@ private void setHead(Node node) {
 - 15.bulk revoke 该类的其他某对象.
 - 16.bulk rebias 该类超过撤销阈值, 后续跳过偏向\直接升级为轻量级锁.
 
+
+
+
+
 ## ThreadPoolExecutor
 - 1. Are workers subject to culling?
 - 2. 怎么样先增加到max workers, 再加任务到workQueue? -> make offer return false(假满) 然后等worker加到极限了再realOffer入队
@@ -76,17 +80,63 @@ private void setHead(Node node) {
 - 4. 滑动窗口最大值的恐怖
 - 5. 围圈报数的恐怖
 
-- x. addWorker如果走到addWorkerFailed(w) 
--> tryTerminate(); 
--> interruptIdleWorkers(ONLY_ONE) 
--> if (!t.isInterrupted() && w.tryLock())就中断线程t.interrupt();
--> getTask里的 workQueue.take() 响应中断, 使得其返回null
--> runWorker的 
+- 6. addWorker如果走到addWorkerFailed(w) 
+- - -> tryTerminate(); 
+- - -> interruptIdleWorkers(ONLY_ONE) 
+- - -> if (!t.isInterrupted() && w.tryLock())就中断线程t.interrupt();
+- - -> getTask里的 workQueue.take() 响应中断
+- - -> Runnable r从workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) : workQueue.take()发现中断异常
+- - -> 捕获 InterruptedException：中断异常没有向上传播，只是在 catch 里把 timedOut 重置，然后回到 for 循环顶部
+- - -> 继续回到循环, 重新检查状态, 如果此时：
+SHUTDOWN 且队列空 就走 decrementWorkerCount 于是 返回 null 导致 退出使得其返回null
+- - -> runWorker的 
 while死循环条件 “(task = getTask()) != null”
 被“getTask()返回null”打破, 
 任务执行完,
 走到completedAbruptly = false;
--> finally块走到 processWorkerExit(w, completedAbruptly); 第二个参数传入false
--> 继续走到 tryTerminate();循环往复
+- - -> finally块走到 processWorkerExit(w, completedAbruptly); 第二个参数传入false
+- - -> 继续走到 tryTerminate();循环往复
+- - -> workerCount == 0 → 进入 TIDYING → TERMINATED，池子真正关闭
 
 terminate workers one by one to avoid concurrency...
+
+- 7. interruptIdleWorkers
+内部会跳过"已经被中断"的线程（!t.isInterrupted()），
+只中断真正空闲、且能 tryLock 成功的 worker。
+
+- 8. 如果是onlyOne的情况, 
+if (onlyOne) break; 保证同一时刻只有一个线程能进来发起中断，避免多个线程并发调用 tryTerminate() 时重复、扎堆地中断
+一次只推一个，配合级联，既高效又不会误伤正在执行任务的 worker
+
+
+- 9. addWorker-添加并启动工作线程
+两步走:
+添加 和 启动
+
+- 10. SHUTDOWN了, 只有当任务为null, 且workQueue不为空的时候
+->必须同时满足这三个条件, 
+addWorker才能走下去
+
+- 11. addWorker时为什么要加锁mainLock
+->防止此时线程池shutdown或者shutdownNow
+
+- 12. 
+
+
+
+## They think alike
+
+### 《奇异博士》— 古一法师
+
+> 死亡赋予生命意义，让你知道时光短暂，去日无多。
+> Death is what gives life meaning, to know your days are numbered, your time is short.
+
+> 你以为我准备好迎接死亡了吗？
+> You'd think, after all, this time I'd be ready.
+
+> 但你会发现。我多么想无限延长这一时刻的光阴，从而欣赏这美丽的雪景。
+> But look at me, stretching one moment out into a thousand, just so I can watch the snow.
+
+### 《赤壁赋》— 苏轼
+
+> 寄蜉蝣于天地，渺沧海之一粟。
