@@ -5,15 +5,17 @@
 
 # 其他一些数据库方面的经典错误案例
 
-## rr没有解决幻读（幻读固然需要解决,但是应尽量避免在一个事务里,让写语句像"夹心饼干"的利一样\夹在两条"一模一样"的奥奥中间,解决问题并不高明,造成幻读的这种写法本不应该被提倡)
+## rr没有解决幻读（幻读固然需要解决,但是应尽量避免在一个事务里,让写语句像"夹心饼干"的利一样\夹在两条"一模一样"的奥奥(读语句)中间,解决问题并不高明,造成幻读的这种写法本不应该被提倡)
 <video src="https://github.com/user-attachments/assets/639875d6-2edf-44df-a20e-d197644cb5e3" controls width="800">
 </video>
 
 ## rr没有解决幻读是因为更新了undo log版本链，而非因为第二次读的时候重新生成了read view
 <video src="https://github.com/user-attachments/assets/0eadbb00-d5bb-4f0a-8e2c-b634dc6a54d4" controls width="800">
 </video>
+
 <video src="https://github.com/user-attachments/assets/daae2ea3-9547-4684-9c84-f1b58e37b773" controls width="800">
 </video>
+
 <video src="https://github.com/user-attachments/assets/0b9bf8ee-2997-4ca6-a38d-851946de4462" controls width="800">
 </video>
 
@@ -26,22 +28,7 @@
 </video>
 
 
-## They think alike
 
-### 《奇异博士》— 古一法师
-
-> 死亡赋予生命意义，让你知道时光短暂，去日无多。
-> Death is what gives life meaning, to know your days are numbered, your time is short.
-
-> 你以为我准备好迎接死亡了吗？
-> You'd think, after all, this time I'd be ready.
-
-> 但你会发现。我多么想无限延长这一时刻的光阴，从而欣赏这美丽的雪景。
-> But look at me, stretching one moment out into a thousand, just so I can watch the snow.
-
-### 《赤壁赋》— 苏轼
-
-> 寄蜉蝣于天地，渺沧海之一粟。
 
 # 源码赏析
 ## AQS
@@ -79,30 +66,31 @@ private void setHead(Node node) {
 
 - 9.LockSupport.park(this);中断信号在锁获取过程中被“延迟处理”，而不是被忽略。虽迟但到.
 - 10.if (ws < 0)
-            compareAndSetWaitStatus(node, ws, 0); 相当乐观, SIGNAL能清就清, 别人已经清了SIGNAL 或者 新入队的节点明确说要等我唤醒于是又把我标记为了SIGNAL, 那也没关系, 尽力而为
+            compareAndSetWaitStatus(node, ws, 0); 相当乐观, SIGNAL能清就清, 别人已经清了SIGNAL 或者 新入队的节点通过shouldParkAfterFailedAcquire明确说要等我唤醒于是又把我标记为了SIGNAL, 那也没关系, 尽力而为
 - 11.tryAcquireNanos的tryAcquire用短路, acquireInterruptibly的用分支...
 - 12.FairSync的tryAcquire和nonfairTryAcquire的包含的通用方法, 也不抽出来...
 - 13.偏向锁撤销是很麻烦的, 所以它要延迟开启.
-- 14.匿名偏向 -> 带有线程id的偏向.
-- 15.bulk revoke 该类的其他某对象.
+- 14.匿名偏向 -> 带有线程id的偏向. 就好似, 就如同
+- 15.bulk revoke 该类的其他某对象. 撤销19次...或许有一天
 - 16.bulk rebias 该类超过撤销阈值, 后续跳过偏向\直接升级为轻量级锁.
+- 17.NonfairSync: 我要抢三次才作罢.
 
 
 
 
 
 ## ThreadPoolExecutor
-- 1. Are workers subject to culling?
+- 1. Are workers subject to culling?的恐怖...
 - 2. 怎么样先增加到max workers, 再加任务到workQueue? -> make offer return false(假满) 然后等worker加到极限了再realOffer入队
 - 3. 怎样不拒绝任务入队? 重写offer, 里面调用put阻塞
-- 4. 滑动窗口最大值的恐怖
-- 5. 围圈报数的恐怖
+- 4. 滑动窗口最大值的恐怖...
+- 5. 围圈报数的恐怖...
 
 - 6. addWorker如果走到addWorkerFailed(w) 
 - - -> tryTerminate(); 
 - - -> interruptIdleWorkers(ONLY_ONE) 
 - - -> if (!t.isInterrupted() && w.tryLock())就中断线程t.interrupt();
-- - -> getTask里的 workQueue.take() 响应中断
+- - -> runWorker里的getTask里的 workQueue.take() 响应中断
 - - -> Runnable r从workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) : workQueue.take()发现中断异常
 - - -> 捕获 InterruptedException：中断异常没有向上传播，只是在 catch 里把 timedOut 重置，然后回到 for 循环顶部
 - - -> 继续回到循环, 重新检查状态, 如果此时：
@@ -116,7 +104,7 @@ while死循环条件 “(task = getTask()) != null”
 - - -> 继续走到 tryTerminate();循环往复
 - - -> workerCount == 0 → 进入 TIDYING → TERMINATED，池子真正关闭
 
-terminate workers one by one to avoid concurrency...
+terminate workers one by one to avoid concurrency...的恐怖
 
 - 7. interruptIdleWorkers
 内部会跳过"已经被中断"的线程（!t.isInterrupted()），
@@ -125,7 +113,6 @@ terminate workers one by one to avoid concurrency...
 - 8. 如果是onlyOne的情况, 
 if (onlyOne) break; 保证同一时刻只有一个线程能进来发起中断，避免多个线程并发调用 tryTerminate() 时重复、扎堆地中断
 一次只推一个，配合级联，既高效又不会误伤正在执行任务的 worker
-
 
 - 9. addWorker-添加并启动工作线程
 两步走:
@@ -136,9 +123,45 @@ if (onlyOne) break; 保证同一时刻只有一个线程能进来发起中断，
 addWorker才能走下去
 
 - 11. addWorker时为什么要加锁mainLock
-->防止此时线程池shutdown或者shutdownNow
+- - ->防止此时线程池shutdown或者shutdownNow
 
-- 12. 
+- 12. runWorker这函数很有意思: 
+- - 一方面, w.unlock(); // allow interrupts 即, 可以随时打断我(SHUTDOWN而非STOP状态时,只要能拿到锁,就中断w.tryLock()); 
+- - 另一方面, 只要我开始做任务了, 就不能被打断了w.lock();
 
+- 13. Worker本身也很有意思
+- - setState(-1); // inhibit interrupts until runWorker
 
+- 14. Worker的tryAcquire是最巧妙的了
+- - 经典的不可重入锁, 非0即1, 只判断compareAndSetState(0, 1)
+
+- 15. shutdown(状态变为SHUTDOWN)和shutdownNow(状态变为STOP)
+- - shutdown(状态变为SHUTDOWN): interruptIdleWorkers();拿到w.tryLock()再中断它, 保证存量任务做完
+- - shutdownNow(状态变为STOP): interruptWorkers();不管三七二十一,上去就中断所有, 压根不关心是否空闲, 无差别地全部处理, 马上叫停, t.interrupt();
+
+- 16. runWorker里面判断线程池是否STOP时, 会存在一个时间缝隙, 会存在一个竞态条件: 
+- - if ((runStateAtLeast(ctl.get(), STOP) ||
+                     (Thread.interrupted() &&
+                      runStateAtLeast(ctl.get(), STOP))) &&
+                    !wt.isInterrupted())
+                    wt.interrupt();
+
+- - 如果没有第二个判断 (Thread.interrupted() && runStateAtLeast(ctl.get(), STOP)), 那么worker就会误以为是"脏中断", 于是, 它会清除中断标志位, 继续执行任务, 导致该叫停的任务没有停下来
+- - 一言以蔽之, recheck是为了防止线程"误以为是脏中断但其实不是"
+
+- 17. getTask -> compareAndDecrementWorkerCount(c)
+- - boolean timedOut = false; // Did the last poll() time out? 取任务超时
+- - boolean timed = allowCoreThreadTimeOut || wc > corePoolSize; 非核心
+
+- 18. getTask只判断 a.线程池状态 和 b.线程数量, 并不指定某个线程是否核心, addWorker时是核心\但后面可能会decrement掉
+
+- 19.  (wc > 1 || workQueue.isEmpty())当是独苗线程时, 如果队列有任务, 则也不能decrement
+
+- 20.  take()的实现
+- - ArrayBlockingQueue: notEmpty.await(); 等待notEmpty.signal();唤醒的Condition类 出队则notFull.signal();单锁吞吐低
+- - LinkedBlockingQueue: notEmpty.await();经典双锁
+
+- 20.  tryTerminate TIDYING -> TERMINATED
+
+- 21. processWorkerExit如果if (runStateLessThan(c, STOP))如果是 不正常移除 或 是正常移除线程导致没有worker了, 就再补回来一个工作线程
 
