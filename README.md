@@ -165,3 +165,8 @@ addWorker才能走下去
 
 - 21. processWorkerExit如果if (runStateLessThan(c, STOP))如果是 不正常移除 或 是正常移除线程导致没有worker了, 就再补回来一个工作线程
 
+
+## 自动化测试框架
+- - Jacoco提高测试覆盖率至90%(cc写)
+- - UI自动化测试: selenium + allure serve
+
