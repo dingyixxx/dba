@@ -74,6 +74,7 @@ private void setHead(Node node) {
 - 15.bulk revoke 该类的其他某对象. 撤销19次...或许有一天
 - 16.bulk rebias 该类超过撤销阈值, 后续跳过偏向\直接升级为轻量级锁.
 - 17.NonfairSync: 我要抢三次才作罢.
+- 18.shouldParkAfterFailedAcquire 依次跳过不靠谱前任, 找到上一个靠谱前驱, 告诉它一定要唤醒作为后继节点的我
 
 
 
