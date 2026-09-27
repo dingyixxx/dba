@@ -171,7 +171,7 @@ addWorker才能走下去
 - - Jacoco提高测试覆盖率至90%(cc写)
 - - UI自动化测试: selenium + allure serve
 - - 拆分大的测试类, 化大为小, 使得"总体的方法签名数量+方法执行耗时的程度"大致一样
-- - 提高maven compile的并发度
+- - 提高maven compile的并发度(分治: kafka分区\innodb表分区\redis分片\ConcurrentHashMap分段锁)
 - - 提高maven test的并发度
 
 
