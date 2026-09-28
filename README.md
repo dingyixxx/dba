@@ -176,12 +176,12 @@ addWorker才能走下去
 - - UI自动化测试: selenium + allure serve
 - - 拆分大的测试类, 化大为小, 使得"总体的方法签名数量+方法执行耗时的程度"大致一样
 - - 提高maven compile的并发度(分治: kafka分区\innodb表分区\redis分片\ConcurrentHashMap分段锁)
-- - 提高maven test的并发度 - 极致压榨出cpu核心的性能
+- - 提高maven test的并发度 - 极致压榨cpu
 
 
 # web容器优化
 - - 多线程
-- - web服务器返回callable, 和子线程解耦, 即, web容器不必等待子线程返回结果的, 提高tomcat吞吐
+- - web服务器返回callable, 和子线程解耦, 即, web容器不必等待子线程返回结果的, 提高tomcat吞吐(kafka的双线程也是类似的, 主线程负责: 拦截器->序列化器->分区器->累加器等"准备消息"事项-业务侧, Sender线程负责处理响应/超时/重试等"发送消息"事项-网络侧, 单一职责, 各司其职, 队列缓冲, 池子)
 - - 经典演员之阻塞队列 -> drainTo -> 批量处理(如果条数少则攒一批, 如果条数多则需要拆成"最大允许批次"/否则包会大/容易丢) -> 再返回结果 
 - - 批处理: 稍高的延迟 去换取 较高的吞吐  (kafka的batch.size/linger.ms/max.poll.interval/max.poll.records, mysql redo log, redis aof)
 
