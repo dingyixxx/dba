@@ -5,7 +5,10 @@
 
 # 其他一些数据库方面的经典错误案例
 
-## rr没有解决幻读（幻读固然需要解决,但是应尽量避免在一个事务里,让写语句像"夹心饼干"的利一样\夹在两条"一模一样"的奥奥(读语句)中间,解决问题并不高明,造成幻读的这种写法本不应该被提倡)
+## rr没有解决幻读
+- 幻读固然需要解决
+- 但是应尽量避免在一个事务里,让写语句像"夹心饼干"的利一样\夹在两条"一模一样"的奥奥(读语句)中间
+- 解决问题并不高明,造成幻读的这种写法本不应该被提倡
 <video src="https://github.com/user-attachments/assets/639875d6-2edf-44df-a20e-d197644cb5e3" controls width="800">
 </video>
 
@@ -31,6 +34,7 @@
 
 
 # 源码赏析
+
 ## AQS
 - 1.addWaiter为什么要把enq(node)单独拆出来一个方法,是为了优先处理一次大多数的pred不为null的场景吗?感觉代码风格像个do...while...
 try-once + spin-fallback
@@ -167,17 +171,17 @@ addWorker才能走下去
 - 21. processWorkerExit如果if (runStateLessThan(c, STOP))如果是 不正常移除 或 是正常移除线程导致没有worker了, 就再补回来一个工作线程
 
 
-## 自动化测试框架
+# 自动化测试框架
 - - Jacoco提高测试覆盖率至90%(cc写)
 - - UI自动化测试: selenium + allure serve
 - - 拆分大的测试类, 化大为小, 使得"总体的方法签名数量+方法执行耗时的程度"大致一样
 - - 提高maven compile的并发度(分治: kafka分区\innodb表分区\redis分片\ConcurrentHashMap分段锁)
-- - 提高maven test的并发度
+- - 提高maven test的并发度 - 极致压榨出cpu核心的性能
 
 
-## web容器优化
+# web容器优化
 - - 多线程
 - - web服务器返回callable, 和子线程解耦, 即, web容器不必等待子线程返回结果的, 提高tomcat吞吐
-- - 阻塞队列 -> drainTo -> 批量处理 -> 再返回结果
+- - 经典演员之阻塞队列 -> drainTo -> 批量处理(如果条数少则攒一批, 如果条数多则需要拆成"最大允许批次"/否则包会大/容易丢) -> 再返回结果 
 - - 批处理: 稍高的延迟 去换取 较高的吞吐  (kafka的batch.size/linger.ms/max.poll.interval/max.poll.records, mysql redo log, redis aof)
 
