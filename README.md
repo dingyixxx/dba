@@ -170,6 +170,18 @@ addWorker才能走下去
 
 - 21. processWorkerExit如果if (runStateLessThan(c, STOP))如果是 不正常移除 或 是正常移除线程导致没有worker了, 就再补回来一个工作线程
 
+- 22. processWorkerExit中completedAbruptly的作用有二: 
+- - a.如果是 不正常移除, 那worker其实没有正确减少, 需要正确地扣减掉一个
+- - b.如果是 不正常移除, 则需要补一个worker回来
+
+- 23. 接上, 什么是不正常移除? 
+- - 除了 a.线程池SHUTDOWN或STOP b.线程超过maxPoolSize c.非核心worker超时了 的 这几种"正常移除"之外的
+
+- 24. 何时会不正常移除? 
+- - -> task.run()抛出runtime异常
+- - -> task.run()抛出error
+- - -> beforeExecute和afterExecute钩子抛出异常
+
 
 # 自动化测试框架
 - - Jacoco提高测试覆盖率至90%(cc写)
@@ -180,8 +192,19 @@ addWorker才能走下去
 
 
 # web容器优化
-- - 多线程
-- - web服务器返回callable, 和子线程解耦, 即, web容器不必等待子线程返回结果的, 提高tomcat吞吐(kafka的双线程也是类似的, 主线程负责: 拦截器->序列化器->分区器->累加器等"准备消息"事项-业务侧, Sender线程负责处理响应/超时/重试等"发送消息"事项-网络侧, 单一职责, 各司其职, 队列缓冲, 池子)
-- - 经典演员之阻塞队列 -> drainTo(一次加锁，批量取出，大幅降低锁竞争和上下文切换) -> 批量处理(如果条数少则攒一批, 如果条数多则需要拆成"最大允许批次"/否则包会大/容易丢) -> 再返回结果 
-- - 批处理: 稍高的延迟 去换取 较高的吞吐  (kafka的batch.size/linger.ms/max.poll.interval/max.poll.records, mysql redo log, redis aof)
+- 1.多线程
+
+- 2.web服务器返回callable, 和子线程解耦
+- - -> 即, web容器不必等待子线程返回结果的, 提高tomcat吞吐
+- - -> 类似的, kafka主线程负责: 拦截器->序列化器->分区器->累加器等"准备消息"事项(业务侧), Sender线程负责处理响应/超时/重试等"发送消息"事项(网络侧)
+- - -> 单一职责, 各司其职, 队列缓冲, 池子
+
+- 3.阻塞队列 -> drainTo -> 批量处理 -> 再返回结果 
+- - -> 阻塞队列，并发编程的经典数据结构，分布式号段, 任务编排, pipeline流水线作业都依靠它
+- - -> 一次加锁，批量取出，大幅降低锁竞争和上下文切换
+- - -> 如果条数少则攒一批, 如果条数多则需要拆成"最大允许批次"/否则包会大/容易丢
+
+- 4.批处理: 稍高的延迟 去换取 较高的吞吐
+- - -> 类似于kafka的batch.size/linger.ms/max.poll.interval/max.poll.records, mysql redo log, redis aof
+- - -> 有多少子弹, 就一次性全部打出去, 摊薄每颗子弹的固定换弹成本, 避免每扣一次扳机都要安装一次子弹 
 
