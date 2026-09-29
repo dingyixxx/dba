@@ -206,5 +206,5 @@ addWorker才能走下去
 
 - 4.批处理: 稍高的延迟 去换取 较高的吞吐
 - - -> 类似于kafka的batch.size/linger.ms/max.poll.interval/max.poll.records, mysql redo log, redis aof
-- - -> 有多少子弹, 就一次性全部打出去, 摊薄每颗子弹的固定换弹成本, 避免每扣一次扳机都要安装一次子弹 
+- - -> 有多少子弹, 就一次性全部打出去, 摊薄每颗子弹的固定换弹成本, 避免每扣一次扳机就要安装一次子弹 
 
