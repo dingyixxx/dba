@@ -192,6 +192,10 @@ addWorker才能走下去
 - - -> parkAndCheckInterrupt 关注的是 park 的阻塞能力：不清除，下次就挂不住了。
 - - -> runWorker 关注的是 线程池状态与中断的语义一致性：不清除，就可能把一个普通中断误判成 STOP。
 
+- 26. runWorker里获取到任务、能走到(Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))的本来也不是空闲线程，不可能有中断标记位的，所以不可能被误清除中断标记位的。
+
+- 27. 线程池里的线程是复用的. 线程中断不能影响后续任务，因此，中断标记位应该及时清，有益而无害。任务中断是任务中断，线程是常在的。
+
 # 自动化测试框架
 - - Jacoco提高测试覆盖率至90%(cc写)
 - - UI自动化测试: selenium + allure serve
