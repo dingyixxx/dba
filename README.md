@@ -154,10 +154,11 @@ addWorker才能走下去
 - - 常规路径判断， 异常路径（应对线程池状态ctl的并发变化）兜底。
 - - Thread.interrupted()本身就是一个“事件信号”，我无缘无故被中断了的话，一定是有其他线程在尝试关掉线程池，那么，我也需要配合着它，停止我的任务。
 
-- - 如果没有 (Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))这个判断条件, 那么会导致一个后果：
-- - -> 线程池并没有要求你停，你怎么敢先行中断？
+- - 如果没有 (Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))这个判断条件, 那么时序就不对了：
+- - -> 本来必须是线程池先STOP，任务再中断。
+- - -> 却变为了：线程池并没有要求你停，你怎么敢先行中断？
 - - -> 会导致任务提前退出（while (!Thread.currentThread().isInterrupted())），
-- - -> 或者导致提前抛出InterruptedException（sleep()、wait()、take()）。
+- - -> 或者导致提前抛出InterruptedException（中断线程执行了sleep()、wait()、take()后）。
 
 - 17. getTask -> compareAndDecrementWorkerCount(c)
 - - boolean timedOut = false; // Did the last poll() time out? 取任务超时
@@ -187,6 +188,9 @@ addWorker才能走下去
 - - -> task.run()抛出error
 - - -> beforeExecute和afterExecute钩子抛出异常
 
+- 25. 中断标志是一个会干扰后续阻塞和状态判断的底层副作用，不能让它未经解释地残留。
+- - -> parkAndCheckInterrupt 关注的是 park 的阻塞能力：不清除，下次就挂不住了。
+- - -> runWorker 关注的是 线程池状态与中断的语义一致性：不清除，就可能把一个普通中断误判成 STOP。
 
 # 自动化测试框架
 - - Jacoco提高测试覆盖率至90%(cc写)
