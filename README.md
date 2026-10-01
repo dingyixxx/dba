@@ -36,7 +36,7 @@
 # 源码赏析
 
 ## AQS
-- 1.addWaiter为什么要把enq(node)单独拆出来一个方法,是为了优先处理一次大多数的pred不为null的场景吗?感觉代码风格像个do...while...
+- 1.addWaiter为什么要把enq(node)单独拆出来一个方法,是为了优先处理一次大多数的pred不为null的场景吗?感觉代码风格像个do...while...先快路径执行一次试一下，未走通，则才走慢路径
 try-once + spin-fallback
 
 - 2.cancelAcquire里,没有成功设置成next链, 才会unparkSuccessor.
@@ -74,11 +74,11 @@ private void setHead(Node node) {
 - 11.tryAcquireNanos的tryAcquire用短路, acquireInterruptibly的用分支...
 - 12.FairSync的tryAcquire和nonfairTryAcquire的包含的通用方法, 也不抽出来...
 - 13.偏向锁撤销是很麻烦的, 所以它要延迟开启.
-- 14.匿名偏向 -> 带有线程id的偏向. 就好似, 就如同
-- 15.bulk revoke 该类的其他某对象. 撤销19次...或许有一天
+- 14.匿名偏向 -> 带有线程id的偏向. 
+- 15.bulk revoke 该类的其他某对象. 
 - 16.bulk rebias 该类超过撤销阈值, 后续跳过偏向\直接升级为轻量级锁.
 - 17.NonfairSync: 我要抢三次才作罢.
-- 18.shouldParkAfterFailedAcquire 依次跳过不靠谱前任, 找到上一个靠谱前驱, 告诉它一定要唤醒作为后继节点的我
+- 18.shouldParkAfterFailedAcquire 依次跳过已取消状态的前任, 找到上一个存续的前驱, 告诉它一定要唤醒作为后继节点的我
 
 
 
@@ -151,8 +151,13 @@ addWorker才能走下去
                     !wt.isInterrupted())
                     wt.interrupt();
 
-- - 如果没有第二个判断 (Thread.interrupted() && runStateAtLeast(ctl.get(), STOP)), 那么worker就会误以为是"脏中断", 于是, 它会清除中断标志位, 继续执行任务, 导致该叫停的任务没有停下来
-- - 一言以蔽之, recheck是为了防止线程"误以为是脏中断但其实不是"
+- - 常规路径判断， 异常路径（应对线程池状态ctl的并发变化）兜底。
+- - Thread.interrupted()本身就是一个“事件信号”，我无缘无故被中断了的话，一定是有其他线程在尝试关掉线程池，那么，我也需要配合着它，停止我的任务。
+
+- - 如果没有 (Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))这个判断条件, 那么会导致一个后果：
+- - -> 线程池并没有要求你停，你怎么敢先行中断？
+- - -> 会导致任务提前退出（while (!Thread.currentThread().isInterrupted())），
+- - -> 或者导致提前抛出InterruptedException（sleep()、wait()、take()）。
 
 - 17. getTask -> compareAndDecrementWorkerCount(c)
 - - boolean timedOut = false; // Did the last poll() time out? 取任务超时
@@ -187,9 +192,9 @@ addWorker才能走下去
 - - Jacoco提高测试覆盖率至90%(cc写)
 - - UI自动化测试: selenium + allure serve
 - - 拆分大的测试类, 化大为小, 使得"总体的方法签名数量+方法执行耗时的程度"大致一样
-- - 提高maven compile的并发度(分治: kafka分区\innodb表分区\redis分片\ConcurrentHashMap分段锁)
+- - 提高maven compile的并发度(分治: kafka分区\innodb表分区\redis分片\ConcurrentHashMap分段锁\LongAdder)
 - - 提高maven test的并发度 - 极致压榨cpu
-- - 跑大量测试用例或者做一些"不关注准确性只关注比率的大数据量任务"时, 如果部分任务执行耗时, 那其实可以刨除这几个掉队任务, 只要是"统计意义上的有效"就是有效的了.
+- - 跑大量测试用例或者做一些"不关注准确性只关注比率的大数据量任务"时, 如果部分任务执行耗时过于长, 那其实可以刨除这几个掉队任务, 只要是"统计意义上的有效"就是有效的了. 
 
 # web容器优化
 - 1.多线程
