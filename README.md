@@ -41,7 +41,9 @@ try-once + spin-fallback
 
 - 2.cancelAcquire里,没有成功设置成next链, 才会unparkSuccessor.
 
-- 3.next链靠不住, prev链永远是最先更新的(更新prev-更新tail-更新next,这么一个顺序). 这就是为什么unparkSuccessor要从后往前找.
+- 3.next链靠不住, prev链永远是最先更新的, 这就是为什么unparkSuccessor要从后往前找.
+  - addWaiter是更新prev-更新tail-更新next这么一个顺序
+  - cancelAcquire的next链甚至根本不会cas成功
 
 - 4.cancelAcquire是因为node.next = node这句话发生得比较晚, 所以,按照next找的话会多找.
 
@@ -69,15 +71,24 @@ private void setHead(Node node) {
 只要不是当前节点head,就会把thread包装入队.
 
 - 9.LockSupport.park(this);中断信号在锁获取过程中被“延迟处理”，而不是被忽略。虽迟但到.
+
 - 10.if (ws < 0)
             compareAndSetWaitStatus(node, ws, 0); 相当乐观, SIGNAL能清就清, 别人已经清了SIGNAL 或者 新入队的节点通过shouldParkAfterFailedAcquire明确说要等我唤醒于是又把我标记为了SIGNAL, 那也没关系, 尽力而为
+
 - 11.tryAcquireNanos的tryAcquire用短路, acquireInterruptibly的用分支...
+
 - 12.FairSync的tryAcquire和nonfairTryAcquire的包含的通用方法, 也不抽出来...
+
 - 13.偏向锁撤销是很麻烦的, 所以它要延迟开启.
+
 - 14.匿名偏向 -> 带有线程id的偏向. 
+
 - 15.bulk revoke 该类的其他某对象. 
+
 - 16.bulk rebias 该类超过撤销阈值, 后续跳过偏向\直接升级为轻量级锁.
+
 - 17.NonfairSync: 我要抢三次才作罢.
+
 - 18.shouldParkAfterFailedAcquire 依次跳过已取消状态的前任, 找到上一个存续的前驱, 告诉它一定要唤醒作为后继节点的我
 
 
@@ -85,139 +96,152 @@ private void setHead(Node node) {
 
 
 ## ThreadPoolExecutor
-- 1. Are workers subject to culling?的恐怖...
-- 2. 怎么样先增加到max workers, 再加任务到workQueue? -> make offer return false(假满) 然后等worker加到极限了再realOffer入队
-- 3. 怎样不拒绝任务入队? 重写offer, 里面调用put阻塞
-- 4. 滑动窗口最大值的恐怖...
-- 5. 围圈报数的恐怖...
+- 1.Are workers subject to culling?的恐怖...
 
-- 6. addWorker如果走到addWorkerFailed(w) 
-- - -> tryTerminate(); 
-- - -> interruptIdleWorkers(ONLY_ONE) 
-- - -> if (!t.isInterrupted() && w.tryLock())就中断线程t.interrupt();
-- - -> runWorker里的getTask里的 workQueue.take() 响应中断
-- - -> Runnable r从workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) : workQueue.take()发现中断异常
-- - -> 捕获 InterruptedException：中断异常没有向上传播，只是在 catch 里把 timedOut 重置，然后回到 for 循环顶部
-- - -> 继续回到循环, 重新检查状态, 如果此时：
+- 2.怎么样先增加到max workers, 再加任务到workQueue? -> make offer return false(假满) 然后等worker加到极限了再realOffer入队
+
+- 3.怎样不拒绝任务入队? 重写offer, 里面调用put阻塞
+
+- 4.滑动窗口最大值的恐怖...
+
+- 5.围圈报数的恐怖...
+
+- 6.addWorker如果走到addWorkerFailed(w) 
+  -  -> tryTerminate(); 
+  -  -> interruptIdleWorkers(ONLY_ONE) 
+  -  -> if (!t.isInterrupted() && w.tryLock())就中断线程t.interrupt();
+  -  -> runWorker里的getTask里的 workQueue.take() 响应中断
+  -  -> Runnable r从workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) : workQueue.take()发现中断异常
+  -  -> 捕获 InterruptedException：中断异常没有向上传播，只是在 catch 里把 timedOut 重置，然后回到 for 循环顶部
+  -  -> 继续回到循环, 重新检查状态, 如果此时：
 SHUTDOWN 且队列空 就走 decrementWorkerCount 于是 返回 null 导致 退出使得其返回null
-- - -> runWorker的 
+  -  -> runWorker的 
 while死循环条件 “(task = getTask()) != null”
 被“getTask()返回null”打破, 
 任务执行完,
 走到completedAbruptly = false;
-- - -> finally块走到 processWorkerExit(w, completedAbruptly); 第二个参数传入false
-- - -> 继续走到 tryTerminate();循环往复
-- - -> workerCount == 0 → 进入 TIDYING → TERMINATED，池子真正关闭
+  -  -> finally块走到 processWorkerExit(w, completedAbruptly); 第二个参数传入false
+  -  -> 继续走到 tryTerminate();循环往复
+  -  -> workerCount == 0 → 进入 TIDYING → TERMINATED，池子真正关闭
 
 terminate workers one by one to avoid concurrency...的恐怖
 
-- 7. interruptIdleWorkers
+- 7.interruptIdleWorkers
 内部会跳过"已经被中断"的线程（!t.isInterrupted()），
 只中断真正空闲、且能 tryLock 成功的 worker。
 
-- 8. 如果是onlyOne的情况, 
+- 8.如果是onlyOne的情况, 
 if (onlyOne) break; 保证同一时刻只有一个线程能进来发起中断，避免多个线程并发调用 tryTerminate() 时重复、扎堆地中断
 一次只推一个，配合级联，既高效又不会误伤正在执行任务的 worker
 
-- 9. addWorker-添加并启动工作线程
+- 9.addWorker-添加并启动工作线程
 两步走:
 添加 和 启动
 
-- 10. SHUTDOWN了, 只有当任务为null, 且workQueue不为空的时候
+- 10.SHUTDOWN了, 只有当任务为null, 且workQueue不为空的时候
 ->必须同时满足这三个条件, 
 addWorker才能走下去
 
-- 11. addWorker时为什么要加锁mainLock
-- - ->防止此时线程池shutdown或者shutdownNow
+- 11.addWorker时为什么要加锁mainLock
+  -  ->防止此时线程池shutdown或者shutdownNow
 
-- 12. runWorker这函数很有意思: 
-- - 一方面, w.unlock(); // allow interrupts 即, 可以随时打断我(SHUTDOWN而非STOP状态时,只要能拿到锁,就中断w.tryLock()); 
-- - 另一方面, 只要我开始做任务了, 就不能被打断了w.lock();
+- 12.runWorker这函数很有意思: 
+  -  一方面, w.unlock(); // allow interrupts 即, 可以随时打断我(SHUTDOWN而非STOP状态时,只要能拿到锁,就中断w.tryLock()); 
+  -  另一方面, 只要我开始做任务了, 就不能被打断了w.lock();
 
-- 13. Worker本身也很有意思
-- - setState(-1); // inhibit interrupts until runWorker
+- 13.Worker本身也很有意思
+  -  setState(-1); // inhibit interrupts until runWorker
 
-- 14. Worker的tryAcquire是最巧妙的了
-- - 经典的不可重入锁, 非0即1, 只判断compareAndSetState(0, 1)
+- 14.Worker的tryAcquire是最巧妙的了
+  -  经典的不可重入锁, 非0即1, 只判断compareAndSetState(0, 1)
 
-- 15. shutdown(状态变为SHUTDOWN)和shutdownNow(状态变为STOP)
-- - shutdown(状态变为SHUTDOWN): interruptIdleWorkers();拿到w.tryLock()再中断它, 保证存量任务做完
-- - shutdownNow(状态变为STOP): interruptWorkers();不管三七二十一,上去就中断所有, 压根不关心是否空闲, 无差别地全部处理, 马上叫停, t.interrupt();
+- 15.shutdown(状态变为SHUTDOWN)和shutdownNow(状态变为STOP)
+  -  shutdown(状态变为SHUTDOWN): interruptIdleWorkers();拿到w.tryLock()再中断它, 保证存量任务做完
+  -  shutdownNow(状态变为STOP): interruptWorkers();不管三七二十一,上去就中断所有, 压根不关心是否空闲, 无差别地全部处理, 马上叫停, t.interrupt();
 
-- 16. runWorker里面判断线程池是否STOP时, 会存在一个时间缝隙, 会存在一个竞态条件: 
-- - if ((runStateAtLeast(ctl.get(), STOP) ||
+- 16.runWorker里面判断线程池是否STOP时, 会存在一个时间缝隙, 会存在一个竞态条件: 
+  -  if ((runStateAtLeast(ctl.get(), STOP) ||
                      (Thread.interrupted() &&
                       runStateAtLeast(ctl.get(), STOP))) &&
                     !wt.isInterrupted())
                     wt.interrupt();
 
-- - 常规路径判断， 异常路径（应对线程池状态ctl的并发变化）兜底。
-- - Thread.interrupted()本身就是一个“事件信号”，我无缘无故被中断了的话，一定是有其他线程在尝试关掉线程池，那么，我也需要配合着它，停止我的任务。
+  -  常规路径判断， 异常路径（应对线程池状态ctl的并发变化）兜底。
+  -  Thread.interrupted()本身就是一个“事件信号”，我无缘无故被中断了的话，一定是有其他线程在尝试关掉线程池，那么，我也需要配合着它，停止我的任务。
 
-- - 如果没有 (Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))这个判断条件, 那么时序就不对了：
-- - -> 本来必须是线程池先STOP，任务再中断。
-- - -> 却变为了：线程池并没有要求你停，你怎么敢先行中断？
-- - -> 会导致任务提前退出（while (!Thread.currentThread().isInterrupted())），
-- - -> 或者导致提前抛出InterruptedException（中断线程执行了sleep()、wait()、take()后）。
+  -  如果没有 (Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))这个判断条件, 那么时序就不对了：
+  -  -> 本来必须是线程池先STOP，任务再中断。
+  -  -> 却变为了：线程池并没有要求你停，你怎么敢先行中断？
+  -  -> 会导致任务提前退出（while (!Thread.currentThread().isInterrupted())），
+  -  -> 或者导致提前抛出InterruptedException（中断线程执行了sleep()、wait()、take()后）。
 
-- 17. getTask -> compareAndDecrementWorkerCount(c)
-- - boolean timedOut = false; // Did the last poll() time out? 取任务超时
-- - boolean timed = allowCoreThreadTimeOut || wc > corePoolSize; 非核心
+- 17.getTask -> compareAndDecrementWorkerCount(c)
+  -  boolean timedOut = false; // Did the last poll() time out? 取任务超时
+  -  boolean timed = allowCoreThreadTimeOut || wc > corePoolSize; 非核心
 
-- 18. getTask只判断 a.线程池状态 和 b.线程数量, 并不指定某个线程是否核心, addWorker时是核心\但后面可能会decrement掉
+- 18.getTask只判断 a.线程池状态 和 b.线程数量, 并不指定某个线程是否核心, addWorker时是核心\但后面可能会decrement掉
 
-- 19.  (wc > 1 || workQueue.isEmpty())当是独苗线程时, 如果队列有任务, 则也不能decrement
+- 19.(wc > 1 || workQueue.isEmpty())当是独苗线程时, 如果队列有任务, 则也不能decrement
 
-- 20.  take()的实现
-- - ArrayBlockingQueue: notEmpty.await(); 等待notEmpty.signal();唤醒的Condition类 出队则notFull.signal();单锁吞吐低
-- - LinkedBlockingQueue: notEmpty.await();经典双锁
+- 20.take()的实现
+  -  ArrayBlockingQueue: notEmpty.await(); 等待notEmpty.signal();唤醒的Condition类 出队则notFull.signal();单锁吞吐低
+  -  LinkedBlockingQueue: notEmpty.await();经典双锁
 
-- 20.  tryTerminate TIDYING -> TERMINATED
+- 20.tryTerminate TIDYING -> TERMINATED
 
-- 21. processWorkerExit如果if (runStateLessThan(c, STOP))如果是 不正常移除 或 是正常移除线程导致没有worker了, 就再补回来一个工作线程
+- 21.processWorkerExit如果if (runStateLessThan(c, STOP))如果是 不正常移除 或 是正常移除线程导致没有worker了, 就再补回来一个工作线程
 
-- 22. processWorkerExit中completedAbruptly的作用有二: 
-- - a.如果是 不正常移除, 那worker其实没有正确减少, 需要正确地扣减掉一个
-- - b.如果是 不正常移除, 则需要补一个worker回来
+- 22.processWorkerExit中completedAbruptly的作用有二: 
+  -  a.如果是 不正常移除, 那worker其实没有正确减少, 需要正确地扣减掉一个
+  -  b.如果是 不正常移除, 则需要补一个worker回来
 
-- 23. 接上, 什么是不正常移除? 
-- - 除了 a.线程池SHUTDOWN或STOP b.线程超过maxPoolSize c.非核心worker超时了 的 这几种"正常移除"之外的
+- 23.接上, 什么是不正常移除? 
+  -  除了 a.线程池SHUTDOWN或STOP b.线程超过maxPoolSize c.非核心worker超时了 的 这几种"正常移除"之外的
 
-- 24. 何时会不正常移除? 
-- - -> task.run()抛出runtime异常
-- - -> task.run()抛出error
-- - -> beforeExecute和afterExecute钩子抛出异常
+- 24.何时会不正常移除? 
+  -  -> task.run()抛出runtime异常
+  -  -> task.run()抛出error
+  -  -> beforeExecute和afterExecute钩子抛出异常
 
-- 25. 中断标志是一个会干扰后续阻塞和状态判断的底层副作用，不能让它未经解释地残留。
-- - -> parkAndCheckInterrupt 关注的是 park 的阻塞能力：不清除，下次就挂不住了。
-- - -> runWorker 关注的是 线程池状态与中断的语义一致性：不清除，就可能把一个普通中断误判成 STOP。
+- 25.中断标志是一个会干扰后续阻塞和状态判断的底层副作用，不能让它未经解释地残留。
+  -  -> parkAndCheckInterrupt 关注的是 park 的阻塞能力：不清除，下次就挂不住了。
+  -  -> runWorker 关注的是 线程池状态与中断的语义一致性：不清除，就可能把一个普通中断误判成 STOP。
 
-- 26. runWorker里获取到任务、能走到(Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))的本来也不是空闲线程，不可能有中断标记位的，所以不可能被误清除中断标记位的。
+- 26.runWorker里获取到任务、能走到(Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))的本来也不是空闲线程，不可能有中断标记位的，所以不可能被误清除中断标记位的。
 
-- 27. 线程池里的线程是复用的. 线程中断不能影响后续任务，因此，中断标记位应该及时清，有益而无害。任务中断是任务中断，线程是常在的。
+- 27.线程池里的线程是复用的. 线程中断不能影响后续任务，因此，中断标记位应该及时清，有益而无害。任务中断是任务中断，线程是要常在的。
+
+
+
+
 
 # 自动化测试框架
-- - Jacoco提高测试覆盖率至90%(cc写)
-- - UI自动化测试: selenium + allure serve
-- - 拆分大的测试类, 化大为小, 使得"总体的方法签名数量+方法执行耗时的程度"大致一样
-- - 提高maven compile的并发度(分治: kafka分区\innodb表分区\redis分片\ConcurrentHashMap分段锁\LongAdder)
-- - 提高maven test的并发度 - 极致压榨cpu
-- - 跑大量测试用例或者做一些"不关注准确性只关注比率的大数据量任务"时, 如果部分任务执行耗时过于长, 那其实可以刨除这几个掉队任务, 只要是"统计意义上的有效"就是有效的了. 
+  -  Jacoco提高测试覆盖率至90%(cc写)
+  -  UI自动化测试: selenium + allure serve
+  -  拆分大的测试类, 化大为小, 使得"总体的方法签名数量+方法执行耗时的程度"大致一样
+  -  提高maven compile的并发度(分治: kafka分区\innodb表分区\redis分片\ConcurrentHashMap分段锁\LongAdder)
+  -  提高maven test的并发度 - 极致压榨cpu
+  -  跑大量测试用例 或者 做一些"不苛求100%准确性只关注大致比率的大数据量任务"时, 如果部分任务执行耗时过于长, 那其实可以刨除这几个掉队任务, 只要是"统计意义上的有效"就是有效的了. 
+
+
+
 
 # web容器优化
 - 1.多线程
 
 - 2.web服务器返回callable, 和子线程解耦
-- - -> 即, web容器不必等待子线程返回结果的, 提高tomcat吞吐
-- - -> 类似的, kafka主线程负责: 拦截器->序列化器->分区器->累加器等"准备消息"事项(业务侧), Sender线程负责处理响应/超时/重试等"发送消息"事项(网络侧)
-- - -> 单一职责, 各司其职, 队列缓冲, 池子
+  -  -> 即, web容器不必等待子线程返回结果的, 提高tomcat吞吐
+  -  -> 类似的, kafka主线程负责: 拦截器->序列化器->分区器->累加器等"准备消息"事项(业务侧), Sender线程负责处理响应/超时/重试等"发送消息"事项(网络侧)
+  -  -> 单一职责, 各司其职, 队列缓冲, 池子
 
 - 3.阻塞队列 -> drainTo -> 批量处理 -> 再返回结果 
-- - -> 阻塞队列，并发编程的经典数据结构，分布式号段, 任务编排, pipeline流水线作业都依靠它
-- - -> 一次加锁，批量取出，大幅降低锁竞争和上下文切换
-- - -> 如果条数少则攒一批, 如果条数多则需要拆成"最大允许批次"/否则包会大/容易丢
+  -  -> 阻塞队列，并发编程的经典数据结构, 分布式号段, 任务编排, pipeline流水线作业都依靠它
+  -  -> 一次加锁，批量取出, 大幅降低锁竞争和上下文切换
+  -  -> 如果条数少则攒一批, 如果条数多则需要拆成"最大允许批次"/否则包会大/容易丢
 
 - 4.批处理: 稍高的延迟 去换取 较高的吞吐
-- - -> 类似于kafka的batch.size/linger.ms/max.poll.interval/max.poll.records, mysql redo log, redis aof
-- - -> 有多少子弹, 就一次性全部打出去, 摊薄每颗子弹的固定换弹成本, 避免每扣一次扳机就要安装一次子弹 
+  -  -> 类似于kafka的batch.size/linger.ms/max.poll.interval/max.poll.records, mysql redo log, redis aof
+  -  -> 有多少子弹, 就一次性全部打出去, 摊薄每颗子弹的固定换弹成本, 避免每扣一次扳机就要安装一次子弹 
 
+- 5.缓存预热、线程池线程预热、代码JIT编译预热、闲时加载（预取）
+  -  -> 提前预装好若干弹夹
