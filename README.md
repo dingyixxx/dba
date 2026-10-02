@@ -179,7 +179,7 @@ addWorker才能走下去
   -  boolean timedOut = false; // Did the last poll() time out? 取任务超时
   -  boolean timed = allowCoreThreadTimeOut || wc > corePoolSize; 非核心
 
-- 18.getTask只判断 a.线程池状态 和 b.线程数量, 并不指定某个线程是否核心, addWorker时是核心\但后面可能会decrement掉
+- 18.getTask只判断 a.线程池状态 和 b.线程数量 （addWorker也只判断这两项, 它和getTask做的是方向相反的两件事情）, 并不指定某个线程是否核心, addWorker时是核心\但后面可能会decrement掉。
 
 - 19.(wc > 1 || workQueue.isEmpty())当是独苗线程时, 如果队列有任务, 则也不能decrement
 
