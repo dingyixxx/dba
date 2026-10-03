@@ -12,7 +12,7 @@
 <video src="https://github.com/user-attachments/assets/639875d6-2edf-44df-a20e-d197644cb5e3" controls width="800">
 </video>
 
-## rr没有解决幻读是因为更新了undo log版本链，而非因为第二次读的时候重新生成了read view
+## rr没有解决幻读是因为更新了undo log版本链, 而非因为第二次读的时候重新生成了read view
 <video src="https://github.com/user-attachments/assets/0eadbb00-d5bb-4f0a-8e2c-b634dc6a54d4" controls width="800">
 </video>
 
@@ -36,7 +36,7 @@
 # 源码赏析
 
 ## AQS
-- 1.addWaiter为什么要把enq(node)单独拆出来一个方法,是为了优先处理一次大多数的pred不为null的场景吗?感觉代码风格像个do...while...先快路径执行一次试一下，未走通，则才走慢路径
+- 1.addWaiter为什么要把enq(node)单独拆出来一个方法,是为了优先处理一次大多数的pred不为null的场景吗?感觉代码风格像个do...while...先快路径执行一次试一下, 未走通, 则才走慢路径
 try-once + spin-fallback
 
 - 2.cancelAcquire里,没有成功设置成next链, 才会unparkSuccessor.
@@ -54,12 +54,12 @@ try-once + spin-fallback
 - 7.接上一点:有至少以下途径会让pred.next不等于predNext, 从而cas不成功
   - shouldParkAfterFailedAcquire来更新前序节点的SIGNAL状态和prev/next链从而跳过所有前序cancelled状态的节点
   - cancelAcquire连续取消两个连续的节点时
-队列：head → A → B → C → D(tail)，B 和 C 同时被取消：
+队列：head → A → B → C → D(tail), B 和 C 同时被取消：
 线程1 取消 B：  想改 A.next
-线程2 取消 C：  pred 跳到 A，记下 predNext = A.next = B
+线程2 取消 C：  pred 跳到 A, 记下 predNext = A.next = B
               准备 CAS(A.next, 期望=B, 新值=D)
 此刻线程1 抢先把 A.next 改了
-              → 线程2 执行 CAS 时，A.next 已经 ≠ B
+              → 线程2 执行 CAS 时, A.next 已经 ≠ B
               → pred.next ≠ predNext → CAS 失败
 
 - 8.设置为head的时候, 就会把它的thread设置为null. 
@@ -70,7 +70,7 @@ private void setHead(Node node) {
     }
 只要不是当前节点head,就会把thread包装入队.
 
-- 9.LockSupport.park(this);中断信号在锁获取过程中被“延迟处理”，而不是被忽略。虽迟但到.
+- 9.LockSupport.park(this);中断信号在锁获取过程中被“延迟处理”, 而不是被忽略。虽迟但到.
 
 - 10.if (ws < 0)
             compareAndSetWaitStatus(node, ws, 0); 相当乐观, SIGNAL能清就清, 别人已经清了SIGNAL 或者 新入队的节点通过shouldParkAfterFailedAcquire明确说要等我唤醒于是又把我标记为了SIGNAL, 那也没关系, 尽力而为
@@ -112,7 +112,7 @@ private void setHead(Node node) {
   -  -> if (!t.isInterrupted() && w.tryLock())就中断线程t.interrupt();
   -  -> runWorker里的getTask里的 workQueue.take() 响应中断
   -  -> Runnable r从workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) : workQueue.take()发现中断异常
-  -  -> 捕获 InterruptedException：中断异常没有向上传播，只是在 catch 里把 timedOut 重置，然后回到 for 循环顶部
+  -  -> 捕获 InterruptedException：中断异常没有向上传播, 只是在 catch 里把 timedOut 重置, 然后回到 for 循环顶部
   -  -> 继续回到循环, 重新检查状态, 如果此时：
 SHUTDOWN 且队列空 就走 decrementWorkerCount 于是 返回 null 导致 退出使得其返回null
   -  -> runWorker的 
@@ -122,17 +122,17 @@ while死循环条件 “(task = getTask()) != null”
 走到completedAbruptly = false;
   -  -> finally块走到 processWorkerExit(w, completedAbruptly); 第二个参数传入false
   -  -> 继续走到 tryTerminate();循环往复
-  -  -> workerCount == 0 → 进入 TIDYING → TERMINATED，池子真正关闭
+  -  -> workerCount == 0 → 进入 TIDYING → TERMINATED, 池子真正关闭
 
 terminate workers one by one to avoid concurrency...的恐怖
 
 - 7.interruptIdleWorkers
-内部会跳过"已经被中断"的线程（!t.isInterrupted()），
+内部会跳过"已经被中断"的线程（!t.isInterrupted()）, 
 只中断真正空闲、且能 tryLock 成功的 worker。
 
 - 8.如果是onlyOne的情况, 
-if (onlyOne) break; 保证同一时刻只有一个线程能进来发起中断，避免多个线程并发调用 tryTerminate() 时重复、扎堆地中断
-一次只推一个，配合级联，既高效又不会误伤正在执行任务的 worker
+if (onlyOne) break; 保证同一时刻只有一个线程能进来发起中断, 避免多个线程并发调用 tryTerminate() 时重复、扎堆地中断
+一次只推一个, 配合级联, 既高效又不会误伤正在执行任务的 worker
 
 - 9.addWorker-添加并启动工作线程
 两步走:
@@ -166,13 +166,13 @@ addWorker才能走下去
                     !wt.isInterrupted())
                     wt.interrupt();
 
-  -  常规路径判断， 异常路径（应对线程池状态ctl的并发变化）兜底。
-  -  Thread.interrupted()本身就是一个“事件信号”，我无缘无故被中断了的话，一定是有其他线程在尝试关掉线程池，那么，我也需要配合着它，停止我的任务。
+  -  常规路径判断,  异常路径（应对线程池状态ctl的并发变化）兜底。
+  -  Thread.interrupted()本身就是一个“事件信号”, 我无缘无故被中断了的话, 一定是有其他线程在尝试关掉线程池, 那么, 我也需要配合着它, 停止我的任务。
 
   -  如果没有 (Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))这个判断条件, 那么时序就不对了：
-  -  -> 本来必须是线程池先STOP，任务再中断。
-  -  -> 却变为了：线程池并没有要求你停，你怎么敢先行中断？
-  -  -> 会导致任务提前退出（while (!Thread.currentThread().isInterrupted())），
+  -  -> 本来必须是线程池先STOP, 任务再中断。
+  -  -> 却变为了：线程池并没有要求你停, 你怎么敢先行中断？
+  -  -> 会导致任务提前退出（while (!Thread.currentThread().isInterrupted())）, 
   -  -> 或者导致提前抛出InterruptedException（中断线程执行了sleep()、wait()、take()后）。
 
 - 17.getTask -> compareAndDecrementWorkerCount(c)
@@ -203,17 +203,80 @@ addWorker才能走下去
   -  -> task.run()抛出error
   -  -> beforeExecute和afterExecute钩子抛出异常
 
-- 25.中断标志是一个会干扰后续阻塞和状态判断的底层副作用，不能让它未经解释地残留。
-  -  -> parkAndCheckInterrupt 关注的是 park 的阻塞能力：不清除，下次就挂不住了。
-  -  -> runWorker 关注的是 线程池状态与中断的语义一致性：不清除，就可能把一个普通中断误判成 STOP。
+- 25.中断标志是一个会干扰后续阻塞和状态判断的底层副作用, 不能让它未经解释地残留。
+  -  -> parkAndCheckInterrupt 关注的是 park 的阻塞能力：不清除, 下次就挂不住了。
+  -  -> runWorker 关注的是 线程池状态与中断的语义一致性：不清除, 就可能把一个普通中断误判成 STOP。
 
-- 26.runWorker里获取到任务、能走到(Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))的本来也不是空闲线程，不可能有中断标记位的，所以不可能被误清除中断标记位的。
+- 26.runWorker里获取到任务、能走到(Thread.interrupted() && runStateAtLeast(ctl.get(), STOP))的本来也不是空闲线程, 不可能有中断标记位的, 所以不可能被误清除中断标记位的。
 
-- 27.线程池里的线程是复用的. 线程中断不能影响后续任务，因此，中断标记位应该及时清，有益而无害。任务中断是任务中断，线程是要常在的。
+- 27.线程池里的线程是复用的. 线程中断不能影响后续任务, 因此, 中断标记位应该及时清, 有益而无害。
+  -  -> 任务中断是任务中断, 线程是要常在的。
 
-- 28.corePoolSize为0, workQueue有任务时再添加worker, 添加的都是非核心
+- 28.执行任务时, 如果corePoolSize为0, workQueue有任务时再添加worker, 添加的都是非核心addWorker(null, false)。
 
 
+## ConcurrentHashMap
+- 1.static final int spread(int h) {
+        return (h ^ (h >>> 16)) & HASH_BITS;
+    }
+  -  -> 用上高16位（尽可能打散以避免哈希冲突）
+  -  -> 清符号位（即, 高1位永远为0, 区分hashcode为负数的特殊节点ReservationNode/ForwardingNode/TreeBin）HASH_BITS = 0x7fffffff
+   -  -> n-1只有当n是2的整数次幂才能保证低位“全”都是1（尽可能打散）
+
+- 2.initTable数组懒加载
+   -  -> 用 sizeCtl + CAS 保证并发下只有一个线程能创建数组, 抢不到的线程 Thread.yield() 自旋等待, 避免重复初始化。
+
+- 3.sizeCtl 是个多功能字段：
+   -  -> = 0（默认）：还没初始化, initTable 时用默认 16。
+   -  -> > 0：来自构造函数指定的初始容量, 或初始化后表示扩容阈值（threshold）。
+   -  -> = -1：有线程正在初始化。
+   -  -> < -1：有线程正在扩容（用 resizeStamp 编码, resize()/transfer时）。
+
+- 4.resizeStamp
+  -  -> static final int resizeStamp(int n) {
+    return Integer.numberOfLeadingZeros(n) | (1 << (RESIZE_STAMP_BITS - 1));
+}
+   -  -> Returns the stamp bits for resizing a table of size n. 
+   -  -> Must be negative when shifted left by RESIZE_STAMP_SHIFT.
+
+```
+sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
+          \________________________/   \__________________/
+                高16位：扩容戳           低16位：线程计数
+```
+   -  -> 高 16 位 = rs：和“旧表长度 n”绑定的戳, 用来标识“这是哪一轮扩容”, 并保证整个值是负数。
+   -  -> 低 16 位 = 线程数 + 1：当前有多少线程在参与迁移（+1 是为了让“0 个线程”时低值=1, 避免歧义）。
+
+- 5.put后计数超阈值时触发，发起扩容addCount(1L, binCount)，binCount通常大于零。
+
+- 6.addCount的两种情况：
+   -  -> 新发起，初始化为扩容戳rs+2，U.compareAndSwapInt(this, SIZECTL, sc, rs + 2) -> transfer(tab, null)  因此，SIZECTL一定是小于-1的
+   -  -> 协助扩容，线程数+1，U.compareAndSwapInt(this, SIZECTL, sc, sc + 1) -> transfer(tab, nt);
+
+- 7.CounterCell，也是一种分散计数，类似于LongAdder，以下两种情况会走：
+   -  -> a.已启用了counterCells
+   -  -> b.或者尚未启用counterCells但是本轮baseCount cas失败说明、已有并发
+
+
+- 8.fullAddCount 当 baseCount 或当前线程对应的 CounterCell 更新失败时，负责初始化 counterCells 数组、创建槽位、重试 CAS、扩容数组，并在极端情况下回退到 baseCount.
+   -  -> 进入fullAddCount(x, uncontended)，cellsBusy拿锁
+   -  -> 初始化	CAS cellsBusy，创建长度为 2 的 counterCells	（new CounterCell[2]）第一次出现竞争时建立分散计数结构.
+   -  -> cellsBusy不是重入锁，非0即1. 主要用于：初始化 和 扩容
+   -  -> 对空槽位 CAS 插入新 CounterCell（rs[h & 1] = new CounterCell(x)）.
+   -  -> counterCells扩容上限为NCPU.
+   -  -> probe 会变化，如果哈希冲突，标记collide，advanceProbe换一个槽位试试.
+   -  -> 最终计数是弱一致的. sumCount() 只是把 baseCount 和所有 CounterCell.value 累加，统计期间可能仍有其他线程在修改，所以 size() 不保证绝对精确，但足够用于扩容判断。
+   -  -> baseCount兜底，即使 counterCells 路径暂时不可用，计数也不会丢失。
+
+
+- 9.transfer最后退出时
+   -  -> sizeCtl = (n << 1) - (n >>> 1);   // ★提交：负数改回新阈值(正数)
+   -  ->     if ((sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT)
+            return;                        // 还有别人在搬，我直接走
+        finishing = advance = true;        // 我是最后一个 → 负责收尾
+        
+
+- 10.
 
 
 
@@ -237,8 +300,8 @@ addWorker才能走下去
   -  -> 单一职责, 各司其职, 队列缓冲, 池子
 
 - 3.阻塞队列 -> drainTo -> 批量处理 -> 再返回结果 
-  -  -> 阻塞队列，并发编程的经典数据结构, 分布式号段, 任务编排, pipeline流水线作业都依靠它
-  -  -> 一次加锁，批量取出, 大幅降低锁竞争和上下文切换
+  -  -> 阻塞队列, 并发编程的经典数据结构, 分布式号段, 任务编排, pipeline流水线作业都依靠它
+  -  -> 一次加锁, 批量取出, 大幅降低锁竞争和上下文切换
   -  -> 如果条数少则攒一批, 如果条数多则需要拆成"最大允许批次"/否则包会大/容易丢
 
 - 4.批处理: 稍高的延迟 去换取 较高的吞吐
