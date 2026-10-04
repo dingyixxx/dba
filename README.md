@@ -221,16 +221,19 @@ addWorker才能走下去
     }
   -  -> 用上高16位（尽可能打散以避免哈希冲突）
   -  -> 清符号位（即, 高1位永远为0, 区分hashcode为负数的特殊节点ReservationNode/ForwardingNode/TreeBin）HASH_BITS = 0x7fffffff
-   -  -> n-1只有当n是2的整数次幂才能保证低位“全”都是1（尽可能打散）
+  -  -> n-1只有当n是2的整数次幂才能保证低位“全”都是1（尽可能打散）
+
 
 - 2.initTable数组懒加载
    -  -> 用 sizeCtl + CAS 保证并发下只有一个线程能创建数组, 抢不到的线程 Thread.yield() 自旋等待, 避免重复初始化。
+
 
 - 3.sizeCtl 是个多功能字段：
    -  -> = 0（默认）：还没初始化, initTable 时用默认 16。
    -  -> > 0：来自构造函数指定的初始容量, 或初始化后表示扩容阈值（threshold）。
    -  -> = -1：有线程正在初始化。
    -  -> < -1：有线程正在扩容（用 resizeStamp 编码, resize()/transfer时）。
+
 
 - 4.resizeStamp
   -  -> static final int resizeStamp(int n) {
@@ -247,37 +250,133 @@ sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
    -  -> 高 16 位 = rs：和“旧表长度 n”绑定的戳, 用来标识“这是哪一轮扩容”, 并保证整个值是负数。
    -  -> 低 16 位 = 线程数 + 1：当前有多少线程在参与迁移（+1 是为了让“0 个线程”时低值=1, 避免歧义）。
 
-- 5.put后计数超阈值时触发，发起扩容addCount(1L, binCount)，binCount通常大于零。
+
+- 5.put后计数超阈值sizeCtl时触发，发起扩容addCount(1L, binCount)，binCount通常大于零。
+
 
 - 6.addCount的两种情况：
    -  -> 新发起，初始化为扩容戳rs+2，U.compareAndSwapInt(this, SIZECTL, sc, rs + 2) -> transfer(tab, null)  因此，SIZECTL一定是小于-1的
    -  -> 协助扩容，线程数+1，U.compareAndSwapInt(this, SIZECTL, sc, sc + 1) -> transfer(tab, nt);
 
-- 7.CounterCell，也是一种分散计数，类似于LongAdder，以下两种情况会走：
+
+- 7.CounterCell，也是一种分散计数，类似于LongAdder，以下两种情况会走fullAddCount：
    -  -> a.已启用了counterCells
    -  -> b.或者尚未启用counterCells但是本轮baseCount cas失败说明、已有并发
 
 
-- 8.fullAddCount 当 baseCount 或当前线程对应的 CounterCell 更新失败时，负责初始化 counterCells 数组、创建槽位、重试 CAS、扩容数组，并在极端情况下回退到 baseCount.
+- 8.fullAddCount(long x, boolean wasUncontended) 的核心思想类似 LongAdder：把计数分散到 CounterCell[] 数组上，避免所有线程都去 CAS 竞争 baseCount。fullAddCount 当 baseCount 或当前线程对应的 CounterCell 更新失败时，负责初始化 counterCells 数组、创建槽位、重试 CAS、扩容数组，并在极端情况下回退到 baseCount.
    -  -> 进入fullAddCount(x, uncontended)，cellsBusy拿锁
    -  -> 初始化	CAS cellsBusy，创建长度为 2 的 counterCells	（new CounterCell[2]）第一次出现竞争时建立分散计数结构.
    -  -> cellsBusy不是重入锁，非0即1. 主要用于：初始化 和 扩容
    -  -> 对空槽位 CAS 插入新 CounterCell（rs[h & 1] = new CounterCell(x)）.
    -  -> counterCells扩容上限为NCPU.
    -  -> probe 会变化，如果哈希冲突，标记collide，advanceProbe换一个槽位试试.
+   -  -> else if (!wasUncontended) wasUncontended = true; 如果进入时已经知道 CAS 失败过，就不要立刻认为需要扩容，而是先把 wasUncontended 纠正为 true，下一轮循环再重新尝试 CAS。这样可以避免因为一次短暂竞争就误判为需要扩容。
+   -  -> cas失败则更新collide以便真正开始走扩容。
    -  -> 最终计数是弱一致的. sumCount() 只是把 baseCount 和所有 CounterCell.value 累加，统计期间可能仍有其他线程在修改，所以 size() 不保证绝对精确，但足够用于扩容判断。
    -  -> baseCount兜底，即使 counterCells 路径暂时不可用，计数也不会丢失。
 
 
-- 9.transfer最后退出时
+- 9.wasUncontended和collide的区别？
+   -  -> wasUncontended 管的是 “这次要不要先重试 CAS”（进入方法前的cas失败）。
+   -  -> collide 管的是 “重试后仍然冲突，要不要扩容 Cell 数组”（执行当前方法体时cas失败）。
+
+
+- 10.collide 的含义：当前 CounterCell 槽位非空，且 CAS 更新 CELLVALUE 失败，确实发生了槽位冲突。
+   -  -> （注意，是在执行当前方法过程中，而不是进入方法之前）
+   -  -> 它的典型状态机：
+   -  -> 初始为 false。
+   -  -> 如果 CAS 更新 a.value 失败，并且数组长度还没达到 NCPU，则把 collide 置为 true。
+   -  -> 下一次循环再次遇到冲突且 collide == true 时，才尝试扩容 counterCells 数组。
+   -  -> 扩容后、或者数组已经达到上限时，collide 会被重置为 false。
+
+
+- 11.transfer最后退出时
    -  -> sizeCtl = (n << 1) - (n >>> 1);   // ★提交：负数改回新阈值(正数)
    -  ->     if ((sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT)
             return;                        // 还有别人在搬，我直接走
         finishing = advance = true;        // 我是最后一个 → 负责收尾
         
 
-- 10.
+- 12.putVal 最后会执行：addCount(1L, binCount);return null;只要 putVal 成功完成一次插入或覆盖，都会调用 addCount。
 
+
+- 13.addCount，if (check <= 1) return;意思是：
+   -  -> 链表只有一个节点、空桶插入、协助扩容后未进入冲突分支时，通常不会触发扩容检查。
+   -  -> 只有链表至少有两个节点、或者桶是红黑树结构时，才会触发扩容检查。
+
+
+- 14.putVal的binCount
+   -  -> 含义不是“链表长度”，而是：本次 put 所在桶的结构信息，用来决定是否需要检查扩容、是否需要树化。
+   -  -> 有以下几种取值：
+   -  -> if (tab == null || (n = tab.length) == 0)，binCount为0，先初始化表，之后继续自旋
+   -  -> else if ((f = tabAt(tab, i = (n - 1) & hash)) == null)，binCount为0，空桶 CAS 插入成功，break掉
+   -  -> else if ((fh = f.hash) == MOVED)，binCount为0，协助扩容后继续自旋
+   -  -> for (Node<K,V> e = f;; ++binCount)，binCount>=1，表示链表中遍历到的节点数，新节点追加时从1开始累加
+   -  -> 红黑树插入/覆盖，binCount=2，表示当前桶是树结构。
+   -  -> 只要进入这个分支，就说明当前桶已经是 TreeBin，冲突程度已经不低了，所以用 2 保证 check >= 2，从而进入扩容检查路径。
+   -  -> 树分支没有遍历链表，不需要精确统计节点数
+  
+
+- 15.putVal桶非空：
+   -  -> 锁住桶的头节点synchronized (f)
+   -  -> 又加了两层检查if (tabAt(tab, i) == f)且（if (fh >= 0) 或else if (f instanceof TreeBin)） ，double check lock，防止头节点在加锁前被替换。
+
+
+- 16. putVal正在扩容：
+   -  -> fh == MOVED说明当前桶已经被迁移线程标记为 ForwardingNode。当前线程会调用 helpTransfer 协助扩容，然后继续自旋。
+
+
+- 17.putVal树化判断：binCount >= TREEIFY_THRESHOLD
+   -  -> 如果链表长度达到阈值，调用 treeifyBin。注意这里不一定会立刻转红黑树：如果数组长度不够64，会先扩容。
+
+
+- 18.ConcurrentHashMap 的并发设计思路：
+   -  -> 空桶走 CAS 快路径fast path
+   -  -> 冲突桶走桶级 synchronized
+   -  -> 扩容（哈希表）时多线程协作
+   -  -> 计数时通过 baseCount + CounterCell[] 分散热点
+
+
+- 19.fullAddCount里的double check
+   -  -> 新增节点时，if (cellsBusy == 0 &&
+                         U.compareAndSwapInt(this, CELLSBUSY, 0, 1))里面还要再检查一次if (counterCells == as)
+   -  -> 扩容的时候，判断了三次 if (cellsBusy == 0)  if (cellsBusy == 0 &&
+                            U.compareAndSwapInt(this, CELLSBUSY, 0, 1)) 以及 if ((rs = counterCells) != null &&
+                                    (m = rs.length) > 0 &&
+                                    rs[j = (m - 1) & h] == null)
+- 20.“扩容”扩的是什么？
+   -  -> addCount 扩容扩的是哈希表（数组+链表or数组+链表+红黑树），为了容纳更多 key-value
+   -  -> fullAddCount扩容扩的CounterCell[] 数组纯用于计数，为了分散计数竞争
+
+
+- 21.putTreeVal 的红黑树插入逻辑
+   -  -> 二叉搜索树BST找dir，找不到就新建节点，再加锁做红黑平衡。
+   -  -> 从 root 开始循环
+   -  -> hash和key都相等则返回
+   -  -> h比当前节点的hash小，往左，否则往右
+   -  -> hash相等key不同，用 tieBreakOrder 决定左右方向
+   -  -> 当找到 p.left 或 p.right 为 null 时，说明插入位置确定了
+
+
+- 22.tieBreakOrder为何存在，以及做了什么
+   -  -> 如果没有实现Comparable或者compareTo返回了0，则需要它
+   -  -> 先递归去左右子树里再找一遍ch.findTreeNode(h, k, kc)
+   -  -> 此刻，真的需要tieBreakOrder来“打破平局”了
+   -  -> 交给System.identityHashCode(a)来裁决
+
+
+- 23.为什么TreeBin要维护两套数据结构呢？
+   -  -> 既是红黑树 root：查找、插入、平衡
+   -  -> 又是双向链表 first：读降级遍历、扩容拆分、删除 unlink
+   -  -> 即使红黑树正在旋转、变色、调整结构，读线程仍然可以沿着 first 双向链表线性遍历，不至于因为树结构调整而阻塞
+
+
+- 24.为什么“父黑不调整、父红要平衡”？
+   -  -> 黑色，标红。
+   -  -> 红色，锁定，旋转。
+
+- 25.findTreeNode 在干什么
 
 
 # 自动化测试框架
