@@ -36,7 +36,8 @@
 # 源码赏析
 
 ## AQS
-- 1.addWaiter为什么要把enq(node)单独拆出来一个方法,是为了优先处理一次大多数的pred不为null的场景吗?感觉代码风格像个do...while...先快路径执行一次试一下, 未走通, 则才走慢路径
+- 1.addWaiter为什么要把enq(node)单独拆出来一个方法,是为了优先处理一次大多数的pred不为null的场景
+  -  -> 先快路径执行一次试一下, 未走通, 则才走慢路径
 try-once + spin-fallback
 
 - 2.cancelAcquire里,没有成功设置成next链, 才会unparkSuccessor.
@@ -255,8 +256,8 @@ sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
 
 
 - 6.addCount的两种情况：
-   -  -> 新发起，初始化为扩容戳rs+2，U.compareAndSwapInt(this, SIZECTL, sc, rs + 2) -> transfer(tab, null)  因此，SIZECTL一定是小于-1的
-   -  -> 协助扩容，线程数+1，U.compareAndSwapInt(this, SIZECTL, sc, sc + 1) -> transfer(tab, nt);
+   -  -> 新发起，此时，sizeCtl大于等于0，初始化为扩容戳rs+2，U.compareAndSwapInt(this, SIZECTL, sc, rs + 2) -> transfer(tab, null)  因此，SIZECTL一定是小于-1的
+   -  -> 协助扩容，此时，sizeCtl已经小于0，线程数+1，U.compareAndSwapInt(this, SIZECTL, sc, sc + 1) -> transfer(tab, nt);
 
 
 - 7.CounterCell，也是一种分散计数，类似于LongAdder，以下两种情况会走fullAddCount：
@@ -376,19 +377,107 @@ sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
    -  -> 插入时，父红，则需要平衡旋转（黑高一致）
    -  -> 删除时，如果删的黑，则需要旋转
 
-- 25.红黑树（黑高一致，尽量平衡）-插入
+- 25.红黑树（黑高一致，尽量平衡）-插入（看叔叔xppl/xppr；插入后，根必须为黑）
    -  -> 先插入红色节点
    -  -> 看父节点
    -  -> 父黑结束
    -  -> 父红看叔叔
    -  -> 叔红变色（叔能分担黑）
    -  -> 叔黑旋转（叔已经是黑或者null，不能再分担黑，所以root旋转）
-   -  -> 必要时继续向上调整
+   -  -> 叔黒如果是ll，则不需要调整，直接右旋；
+```
+Before:
+        G(B)
+       /    \
+     P(R)    U(B/nil)
+     /
+   X(R)
 
-- 26.红黑树-删除
+Action:
+- P 变黑
+- G 变红
+- 对 G 右旋
+
+After:
+        P(B)
+       /    \
+     X(R)   G(R)
+             \
+             U(B/nil)  
+```
+   -  -> 叔黒如果是rr，则不需要调整，直接左旋；
+```
+Before:
+     G(B)
+    /    \
+ U(B/nil) P(R)
+              \
+              X(R)
+
+Action:
+- P 变黑
+- G 变红
+- 对 G 左旋
+
+After:
+        P(B)
+       /    \
+     G(R)   X(R)
+     /
+   U(B/nil)
+```
+   -  -> 叔黑如果是rl，则需要先调整为rr，再左旋； 
+```
+Before:
+     G(B)
+    /    \
+ U(B/nil) P(R)
+          /
+        X(R)
+
+Action:
+- 先对 P 右旋 → 变成 RR
+- 再对 G 左旋
+- X 变黑，G 变红
+
+After:
+        X(B)
+       /    \
+     G(R)   P(R)
+     /
+   U(B/nil)
+```
+   -  -> 叔黒如果是lr，则需要先调整为ll，再右旋；   
+```
+Before:
+        G(B)
+       /    \
+     P(R)    U(B/nil)
+         \
+         X(R)
+
+Action:
+- 先对 P 左旋 → 变成 LL
+- 再对 G 右旋
+- X 变黑，G 变红
+
+After:
+        X(B)
+       /    \
+     P(R)   G(R)
+               \
+               U(B/nil)
+```
+   -  -> 必要时继续向上调整
+   -  -> 一个容易混的地方：
+   -  -> LL/RR 单旋：顶上来的是父节点 P，所以是 P 黑、G 红；
+   -  -> LR/RL 双旋：顶上来的是新节点 X，所以是 X 黑、G 红，P 保持红。
+   -  -> 另外，balanceInsertion 最后一定会做一次：if (root != null)root.red = false无论中间怎么变色旋转，根节点最终强制为黑;
+
+- 26.红黑树-删除（看兄弟xpl/xpr和近侄、远侄；删除后，根必须为黑）
    -  -> 删红：通常结束
    -  -> 删黑：出现双重黑
-   -  -> 兄弟红：旋转+变色（兄弟可借1红孩子，旋转）
+   -  -> 兄弟红：旋转+变色（兄弟可借1红孩子，旋转），制造黑兄弟（红兄弟变的），但尚未还债，还债还是靠远侄红
 ```
         P(B)                            S(B)
        /    \                          /    \
@@ -406,7 +495,7 @@ sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
           wl(B) wr(B)               wl(B) wr(B)
 ```
 
-   -  -> 兄弟黑、近侄子红：先转成远侄子红，再处理（不能直接对 p 左旋，因为 远侄是黑的，左旋后右侧会亏黑。所以要先做一次“整形”把红孩子转到外侧）
+   -  -> 兄弟黑、近侄子红：先转成远侄子红，再处理（不能直接对p左旋，否则w变root、wl变为p的右孩子、会导致w-wr这一右侧路径会亏1黑。所以要先做一次“整形”把红孩子转到外侧，近侄红变为远侄红后，就和下面这个分支的情况一致了，兄弟wl继承父p的颜色、父p变黑、远侄w变黑、对父p左旋、wl变为root，右侧的w和wr都是黑的，左侧欠掉的那1个黑色被补回来。）
 ```
         p(?)                       p(?)
        /   \                      /   \
@@ -417,6 +506,15 @@ sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
                                             wr(B)
 ```
 
+```
+        p(?)                       wl(B)
+       /   \                      /     \
+    x(DB)   wl(B)      =>      p(?)     w(R)
+               \              /   \       \
+               w(R)        x(B)  wl(B)     wr(B)
+                 \
+                 wr(R)
+```
    -  -> 兄弟黑、远侄子红：旋转+变色，结束（用外侧红孩子旋转还债）
 ```
         P(?)                  S(?)
@@ -436,12 +534,15 @@ sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
    -  -> S 最多一个右孩子，这个右孩子就是 X
 
 
-- 28.findTreeNode 最后调用了else if ((q = pr.findTreeNode(h, k, kc)) != null)return q;是什么意思？
+- 28.findTreeNode 最后调用了else if ((q = pr.findTreeNode(h, k, kc)) != null)return q;
+   -  -> 往右找找着了
+
 
 - 29.双向链表-降级遍历：
    -  -> 读不等待写
    -  -> if (((s = lockState) & (WAITER|WRITER)) != 0)有写者在 lockRoot() 调整树调整树结构，直接走链表
    -  -> 如果没有写者，则走红黑树，cas增加读者数量else if (U.compareAndSwapInt(this, LOCKSTATE, s, s + READER))
+
 
 - 30.双向链表-扩容拆分：
    -  -> 扩容迁移时，transfer 遇到 TreeBin 不会直接在树上拆，而是遍历 t.first
@@ -449,6 +550,7 @@ sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
    -  -> else高位链
    -  -> 拆完后：节点数 ≤ 6：退化成普通链表；节点数 > 6：重建红黑树。
    -  -> 所以 first 链表的作用很关键：扩容拆分不需要理解红黑树结构，只要按链表顺序拆 hash 高低位即可。
+
 
 - 31.双向链表-删除 unlink：
    -  -> 从红黑树中摘除，并做删除平衡
@@ -460,7 +562,36 @@ sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
             if (next != null)
                 next.prev = pred;
 
-- 32.             
+
+- 32.transfer函数：
+   -  -> 每个线程认领的是 [bound, i) 这样一段区间（至少16个槽位）。
+   -  -> 线程把自己这段搬完后，会尝试 CAS sizeCtl - 1
+   -  -> 如果自己是最后一个正在搬运的线程，就会i = n; // recheck before commit
+   -  -> 之后，还要再--i来确保n-1个节点都已经标记为了MOVED\补上 ForwardingNode\有遗漏需补迁移
+   -  -> 直到满足i<0这个条件if (i < 0 || i >= n || i + n >= nextn) ，搬运结束，协助扩容告一段落，nextTable置空，table更新为nextTab，重设sizeCtl = (n << 1) - (n >>> 1);
+   -  -> 依然很保守地在加锁后，再一次判断了if (tabAt(tab, i) == f)
+
+
+- 32.addCount里，transfer(tab, nt)协助扩容时nt就是nextTable
+   -  -> 扩容协助迁移开始时，nextTable = nextTab;
+   -  -> 扩容协助迁移结束后，nextTable = null;
+
+
+- 33.怎么理解fullAddCount和sumCount呢？
+
+  - fullAddCount
+   -  -> 是“写入计数”，负责更新计数。发生于“高并发、来不及做扩容的事儿”的情况（保证先把计数不遗漏地计明白，扩容后面再做、它不会被漏掉、只是等到下一次putVal合并处理了）。
+   -  -> 当 baseCount CAS 失败、Cell 不存在、Cell CAS 失败时进入。
+
+  - sumCount
+   -  -> 是“读取计数”，负责读取总计数。发生于“并发不高、足够有空来扩容”的情况。
+   -  -> 计算 baseCount + 所有 CounterCell.value。
+
+  - 逻辑判断: 
+   -  -> 如果baseCount被成功cas，则可能扩容进而更新s = sumCount();
+   -  -> 如未成功对baseCount做cas，则进入竞争路径
+   -  -> 入成功更新某个 CounterCell，则可能调用 sumCount() 检查扩容，实在是!wasUncontended或者collide的情况，再回落到去对BASECOUNT做cas
+   -  -> 如未成功对CounterCell做cas，fullAddCount() 负责修复/初始化 Cell，然后直接 return
 
 
 
