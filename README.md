@@ -386,87 +386,59 @@ sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
    -  -> 叔黑旋转（叔已经是黑或者null，不能再分担黑，所以root旋转）
    -  -> 叔黒如果是ll，则不需要调整，直接右旋；
 ```
-Before:
-        G(B)
-       /    \
-     P(R)    U(B/nil)
-     /
-   X(R)
+Before:                           After:
+        G(B)                              P(B)
+       /    \                            /    \
+     P(R)    U(B/nil)                  X(R)   G(R)
+     /                                         \
+   X(R)                                        U(B/nil)
 
 Action:
 - P 变黑
 - G 变红
 - 对 G 右旋
-
-After:
-        P(B)
-       /    \
-     X(R)   G(R)
-             \
-             U(B/nil)  
 ```
    -  -> 叔黒如果是rr，则不需要调整，直接左旋；
 ```
-Before:
-     G(B)
-    /    \
- U(B/nil) P(R)
-              \
-              X(R)
+Before:                           After:
+     G(B)                                 P(B)
+    /    \                               /    \
+ U(B/nil) P(R)                         G(R)   X(R)
+              \                        /
+              X(R)                   U(B/nil)
 
 Action:
 - P 变黑
 - G 变红
 - 对 G 左旋
-
-After:
-        P(B)
-       /    \
-     G(R)   X(R)
-     /
-   U(B/nil)
 ```
    -  -> 叔黑如果是rl，则需要先调整为rr，再左旋； 
 ```
-Before:
-     G(B)
-    /    \
- U(B/nil) P(R)
-          /
-        X(R)
+Before:                           After:
+     G(B)                                 X(B)
+    /    \                               /    \
+ U(B/nil) P(R)                         G(R)   P(R)
+          /                            /
+        X(R)                         U(B/nil)
 
 Action:
 - 先对 P 右旋 → 变成 RR
 - 再对 G 左旋
 - X 变黑，G 变红
-
-After:
-        X(B)
-       /    \
-     G(R)   P(R)
-     /
-   U(B/nil)
 ```
    -  -> 叔黒如果是lr，则需要先调整为ll，再右旋；   
 ```
-Before:
-        G(B)
-       /    \
-     P(R)    U(B/nil)
-         \
-         X(R)
+Before:                           After:
+        G(B)                              X(B)
+       /    \                            /    \
+     P(R)    U(B/nil)                  P(R)   G(R)
+         \                                       \
+         X(R)                                    U(B/nil)
 
 Action:
 - 先对 P 左旋 → 变成 LL
 - 再对 G 右旋
 - X 变黑，G 变红
-
-After:
-        X(B)
-       /    \
-     P(R)   G(R)
-               \
-               U(B/nil)
 ```
    -  -> 必要时继续向上调整
    -  -> 一个容易混的地方：
@@ -592,6 +564,13 @@ After:
     - -> 如未成功对baseCount做cas，则进入竞争路径
     - -> 如成功更新某个 CounterCell，则可能调用 sumCount() 检查扩容，实在是!wasUncontended或者collide的情况，再回落到去对BASECOUNT做cas
     - -> 如未成功对CounterCell做cas，fullAddCount() 负责修复/初始化 Cell，然后直接 return
+
+
+- 35.sizeCtl在扩容时的编码
+    - -> sizeCtl = (rs << RESIZE_STAMP_SHIFT) + 2   // 第一个线程发起扩容
+    - -> sizeCtl = (rs << RESIZE_STAMP_SHIFT) + N   // N 表示当前扩容线程数 + 1
+
+- 36.
 
 
 
