@@ -216,6 +216,10 @@ addWorker才能走下去
 - 28.执行任务时, 如果corePoolSize为0, workQueue有任务时再添加worker, 添加的都是非核心addWorker(null, false)。
 
 
+
+
+
+
 ## ConcurrentHashMap
 - 1.static final int spread(int h) {
         return (h ^ (h >>> 16)) & HASH_BITS;
@@ -232,7 +236,7 @@ addWorker才能走下去
 - 3.sizeCtl 是个多功能字段：
    -  -> = 0（默认）：还没初始化, initTable 时用默认 16。
    -  -> > 0：来自构造函数指定的初始容量, 或初始化后表示扩容阈值（threshold）。
-   -  -> = -1：有线程正在初始化。
+   -  -> = -1：有线程正在初始化。initTable里面的判断else if (U.compareAndSwapInt(this, SIZECTL, sc, -1))
    -  -> < -1：有线程正在扩容（用 resizeStamp 编码, resize()/transfer时）。
 
 
@@ -536,12 +540,23 @@ Action:
 
 
 - 32.transfer函数：
-   -  -> 每个线程认领的是 [bound, i) 这样一段区间（至少16个槽位）。
-   -  -> 线程把自己这段搬完后，会尝试 CAS sizeCtl - 1
-   -  -> 如果自己是最后一个正在搬运的线程，就会i = n; // recheck before commit
-   -  -> 之后，还要再--i来确保n-1个节点都已经标记为了MOVED\补上 ForwardingNode\有遗漏需补迁移
-   -  -> 直到满足i<0这个条件if (i < 0 || i >= n || i + n >= nextn) ，搬运结束，协助扩容告一段落，nextTable置空，table更新为nextTab，重设sizeCtl = (n << 1) - (n >>> 1);
+   -  -> 初始化新表（第一个扩容线程负责创建新表
+   -  -> if (nextTab == null)Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n << 1];
+   -  -> advance 是否可以继续推进i来认领区间，先进入cas分支得到bound和i，后面就会进到--i>=bound而不是进入cas分支
+   -  -> finishing 是否进入搬完桶了、提交前复查
+   -  -> 认领区间：每个线程通过CAS TRANSFERINDEX从高位往低位认领[bound, i) 区间（至少16个槽位）
+   -  -> 迁移桶：空桶放 ForwardingNode，已迁移跳过，非空桶加锁拆分链表/红黑树（牢牢锁住）
    -  -> 依然很保守地在加锁后，再一次判断了if (tabAt(tab, i) == f)
+   -  -> 最后 setTabAt(tab, i, fwd)
+   -  -> 收尾提交：如果自己是最后一个正在搬运的线程则把finishing置true
+   -  -> 且i = n; // recheck before commit
+   -  -> 从 n-1 扫到 0，要再--i来确保n-1个节点都已经标记为了MOVED\补上 ForwardingNode\有遗漏需补迁移
+   -  -> 直到满足i<0这个条件if (i < 0 || i >= n || i + n >= nextn) ，搬运结束，协助扩容告一段落，nextTable置空，table更新为nextTab，重设sizeCtl = (n << 1) - (n >>> 1);
+   -  -> 线程处理完自己认领的区间后，i 会递减到 < bound
+   -  -> 且如果transferIndex <= 0 说明全局任务已分配完
+   -  -> CAS TRANSFERINDEX 也抢不到新区间
+   -  -> 就会if (i < 0 || i >= n || i + n >= nextn)
+   -  -> 线程作为最后一个搬桶的，搬完后，会尝试 CAS sizeCtl - 1
 
 
 - 33.addCount里，transfer(tab, nt)协助扩容时nt就是nextTable
@@ -557,6 +572,7 @@ Action:
 
   - sumCount
     - -> 是“读取计数”，负责读取总计数。发生于“并发不高、足够有空来扩容”的情况。
+    - -> 不写只读。
     - -> 计算 baseCount + 所有 CounterCell.value。
 
   - 逻辑判断:
@@ -566,11 +582,74 @@ Action:
     - -> 如未成功对CounterCell做cas，fullAddCount() 负责修复/初始化 Cell，然后直接 return
 
 
-- 35.sizeCtl在扩容时的编码
+- 35.sizeCtl在扩容过程中的编码
     - -> sizeCtl = (rs << RESIZE_STAMP_SHIFT) + 2   // 第一个线程发起扩容
     - -> sizeCtl = (rs << RESIZE_STAMP_SHIFT) + N   // N 表示当前扩容线程数 + 1
+    - -> sizeCtl在扩容中都是负数，在addCount、helpTransfer和tryPresize函数中都会存在类似sizeCtl = (rs << RESIZE_STAMP_SHIFT) + 2;的逻辑
+    - -> 扩容后才sizeCtl = (n << 1) - (n >>> 1);变为正数（阈值）
 
-- 36.
+- 36.tryPresize（负责发起扩容）关于是否要break掉的判断
+    - -> (nt = nextTable) == null说明任务已分配完
+    - -> transferIndex <= 0说明出现了扩容异常
+    - -> (sc >>> RESIZE_STAMP_SHIFT) != rs 高 16 位不匹配（不是一个扩容戳），说明不是同一轮扩容，不能加入
+
+
+- 37.helpTransfer（协助扩容）关于是否要break掉的判断
+    - -> transferIndex <= 0
+
+
+- 38.addCount关于是否要break掉的判断
+    - -> (nt = nextTable) == null
+    - -> transferIndex <= 0
+
+
+- 39.addCount、tryPresize、helpTransfer 调 transfer 有什么区别
+    - -> addCount，发生于put/remove 后元素数超过阈值，已在扩容则传 nextTable，否则传 null
+    - -> tryPresize，发生于putAll 或树化前容量不足，发起时传 null，协助时传 nextTable
+    - -> helpTransfer，发生于put 遇到 ForwardingNode，传 ForwardingNode.nextTable
+
+- 40.tab的链表扩容迁移
+    - -> 旧表 tab[5]（n=16）:A(位0) → B(位16) → C(位0) → D(位16) → E(位16)
+    - -> lastRun（从D开始后面都是16）
+    - -> 第一遍后：runBit=16, lastRun=D, if (runBit != 0) → hn = lastRun = D→E, ln = null
+    - -> 第二遍克隆 A、B、C：
+    - -> A(位0) → 头插 ln:  ln = A
+    - -> B(位16) → 头插 hn: hn = B → D → E
+    - -> C(位0) → 头插 ln:  ln = C → A
+    - -> 结果：
+    - -> nextTab[5]  = C → A          （低位，hash&16==0）
+    - -> nextTab[21] = B → D → E     （高位，hash&16==16）
+    - -> tab[5]      = ForwardingNode  （标记已迁移）
+
+- 41.tab的红黑树扩容迁移图示
+    - -> TreeBin.first 链表遍历：
+    - -> A(hash&16==0)  → 低位 lo:  A
+    - -> B(hash&16==16) → 高位 hi:  B
+    - -> C(hash&16==0)  → 低位 lo:  A → C
+    - -> D(hash&16==16) → 高位 hi:  B → D
+    - -> E(hash&16==0)  → 低位 lo:  A → C → E
+    - -> 结果：lc=3, hc=2
+    - -> lc > 6? 否 → 但 hc != 0 → 低位重建 TreeBin(A,C,E)
+    - -> hc > 6? 否 → 但 lc != 0 → 高位重建 TreeBin(B,D)
+    - -> nextTab[5]  = TreeBin(A, C, E)     ← 低位
+    - -> nextTab[21] = TreeBin(B, D)        ← 高位
+    - -> tab[5]      = ForwardingNode
+
+- 42.concurrentHashmap为什么“头插法”没问题
+    - -> 因为有synchronized (f)锁住桶头
+    - -> 有 tabAt(tab, i) == f双重检查
+    - -> 旧桶最后会被替换成 ForwardingNode
+    - -> 迁移时，synchronized加了锁保证“旧桶只读不写”
+    - -> 读线程遇到 ForwardingNode会去nextTable 找数据（hash固定为-1，也就是MOVED，表示这个桶已经迁移完毕，已经拆分成低位链和高位链，nextTable是volatile的、读写屏障避免不完整实例）
+
+- 43.红黑树为什么不能直接复用旧TreeNode
+    - -> 旧桶还没完全替换成ForwardingNode时，读线程可能同时访问旧树
+    - -> TreeNode有parent/left/right/prev 等指针，重建红黑树时会修改这些指针
+    - -> 一旦修改，旧树结构会被破坏，读线程可能看到不一致状态
+    - -> 拆分后可能退化成链表，也可能重建 TreeBin，旧结构不能直接沿用
+
+- 44.lastRun优化，为什么能省克隆？
+    - -> 因为就是简单双向链表，所以直接引用了，不用克隆
 
 
 
@@ -582,8 +661,17 @@ Action:
   -  提高maven test的并发度 - 极致压榨cpu
   -  跑大量测试用例 或者 做一些"不苛求100%准确性只关注大致比率的大数据量任务"时, 如果部分任务执行耗时过于长, 那其实可以刨除这几个掉队任务, 只要是"统计意义上的有效"就是有效的了. 
 
+
+
+
+
+
 # 告警
   -  告警太多==没有告警
+
+
+
+
 
 # web容器优化
 - 1.多线程
