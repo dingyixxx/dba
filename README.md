@@ -572,26 +572,26 @@ After:
    -  -> 依然很保守地在加锁后，再一次判断了if (tabAt(tab, i) == f)
 
 
-- 32.addCount里，transfer(tab, nt)协助扩容时nt就是nextTable
+- 33.addCount里，transfer(tab, nt)协助扩容时nt就是nextTable
    -  -> 扩容协助迁移开始时，nextTable = nextTab;
    -  -> 扩容协助迁移结束后，nextTable = null;
 
 
-- 33.怎么理解fullAddCount和sumCount呢？
+- 34.怎么理解fullAddCount和sumCount呢？
 
   - fullAddCount
-   -  -> 是“写入计数”，负责更新计数。发生于“高并发、来不及做扩容的事儿”的情况（保证先把计数不遗漏地计明白，扩容后面再做、它不会被漏掉、只是等到下一次putVal合并处理了）。
-   -  -> 当 baseCount CAS 失败、Cell 不存在、Cell CAS 失败时进入。
+    - -> 是“写入计数”，负责更新计数。发生于“高并发、来不及做扩容的事儿”的情况（保证先把计数不遗漏地计明白，扩容后面再做、它不会被漏掉、只是等到下一次putVal合并处理了）。
+    - -> 当 baseCount CAS 失败、Cell 不存在、Cell CAS 失败时进入。
 
   - sumCount
-   -  -> 是“读取计数”，负责读取总计数。发生于“并发不高、足够有空来扩容”的情况。
-   -  -> 计算 baseCount + 所有 CounterCell.value。
+    - -> 是“读取计数”，负责读取总计数。发生于“并发不高、足够有空来扩容”的情况。
+    - -> 计算 baseCount + 所有 CounterCell.value。
 
-  - 逻辑判断: 
-   -  -> 如果baseCount被成功cas，则可能扩容进而更新s = sumCount();
-   -  -> 如未成功对baseCount做cas，则进入竞争路径
-   -  -> 入成功更新某个 CounterCell，则可能调用 sumCount() 检查扩容，实在是!wasUncontended或者collide的情况，再回落到去对BASECOUNT做cas
-   -  -> 如未成功对CounterCell做cas，fullAddCount() 负责修复/初始化 Cell，然后直接 return
+  - 逻辑判断:
+    - -> 如果baseCount被成功cas，则可能扩容进而更新s = sumCount();
+    - -> 如未成功对baseCount做cas，则进入竞争路径
+    - -> 如成功更新某个 CounterCell，则可能调用 sumCount() 检查扩容，实在是!wasUncontended或者collide的情况，再回落到去对BASECOUNT做cas
+    - -> 如未成功对CounterCell做cas，fullAddCount() 负责修复/初始化 Cell，然后直接 return
 
 
 
