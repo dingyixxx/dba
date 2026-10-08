@@ -229,8 +229,10 @@ addWorker才能走下去
   -  -> n-1只有当n是2的整数次幂才能保证低位“全”都是1（尽可能打散）
 
 
-- 2.initTable数组懒加载
+- 2.initTable
+   -  -> 数组懒加载, putVal时才懒加载
    -  -> 用 sizeCtl + CAS 保证并发下只有一个线程能创建数组, 抢不到的线程 Thread.yield() 自旋等待, 避免重复初始化。
+   -  -> (tab = table) == null || tab.length == 0 出现了两次
 
 
 - 3.sizeCtl 是个多功能字段：
@@ -320,7 +322,7 @@ sizeCtl = (rs << RESIZE_STAMP_SHIFT) + (参与扩容线程数 + 1)
    -  -> for (Node<K,V> e = f;; ++binCount)，binCount>=1，表示链表中遍历到的节点数，新节点追加时从1开始累加
    -  -> 红黑树插入/覆盖，binCount=2，表示当前桶是树结构。
    -  -> 只要进入这个分支，就说明当前桶已经是 TreeBin，冲突程度已经不低了，所以用 2 保证 check >= 2，从而进入扩容检查路径。
-   -  -> 树分支没有遍历链表，不需要精确统计节点数
+   -  -> 树分支没有遍历链表，不需要精确统计节点数 
   
 
 - 15.putVal桶非空：
