@@ -236,7 +236,7 @@ addWorker才能走下去
 - 3.sizeCtl 是个多功能字段：
    -  -> = 0（默认）：还没初始化, initTable 时用默认 16。
    -  -> > 0：来自构造函数指定的初始容量, 或初始化后表示扩容阈值（threshold）。
-   -  -> = -1：有线程正在初始化。initTable里面的判断else if (U.compareAndSwapInt(this, SIZECTL, sc, -1))
+   -  -> = -1：有线程正在初始化。initTable和tryPresize里面的判断else if (U.compareAndSwapInt(this, SIZECTL, sc, -1))
    -  -> < -1：有线程正在扩容（用 resizeStamp 编码, resize()/transfer时）。
 
 
@@ -453,7 +453,7 @@ Action:
 - 26.红黑树-删除（看兄弟xpl/xpr和近侄、远侄；删除后，根必须为黑）
    -  -> 删红：通常结束
    -  -> 删黑：出现双重黑
-   -  -> 兄弟红：旋转+变色（兄弟可借1红孩子，旋转），制造黑兄弟（红兄弟变的），但尚未还债，还债还是靠远侄红
+   -  -> 兄弟红：旋转+变色（兄弟可借1红孩子，旋转），制造黑兄弟（红兄弟变的）。但尚未还债，还债还是靠远侄红
 ```
         P(B)                            S(B)
        /    \                          /    \
@@ -483,13 +483,13 @@ Action:
 ```
 
 ```
-        p(?)                       wl(B)
+        p(?)                       wl(?)
        /   \                      /     \
-    x(DB)   wl(B)      =>      p(?)     w(R)
-               \              /   \       \
-               w(R)        x(B)  wl(B)     wr(B)
+    x(DB)   wl(B)      =>      p(B)     w(R)
+               \              /            \
+               w(R)        x(B)           wr(B)
                  \
-                 wr(R)
+                 wr(B)
 ```
    -  -> 兄弟黑、远侄子红：旋转+变色，结束（用外侧红孩子旋转还债）
 ```
@@ -555,8 +555,8 @@ Action:
    -  -> 线程处理完自己认领的区间后，i 会递减到 < bound
    -  -> 且如果transferIndex <= 0 说明全局任务已分配完
    -  -> CAS TRANSFERINDEX 也抢不到新区间
-   -  -> 就会if (i < 0 || i >= n || i + n >= nextn)
    -  -> 线程作为最后一个搬桶的，搬完后，会尝试 CAS sizeCtl - 1
+   -  -> 就会if (i < 0 || i >= n || i + n >= nextn)
 
 
 - 33.addCount里，transfer(tab, nt)协助扩容时nt就是nextTable
@@ -651,6 +651,11 @@ Action:
 - 44.lastRun优化，为什么能省克隆？
     - -> 因为就是简单双向链表，所以直接引用了，不用克隆
 
+- 45.何时触发扩容？
+    - -> treeifyBin链表转红黑树之前tryPresize
+    - -> putAll也会调用tryPresize，毕竟是传入了一个全新的大map（顺便地，此时的tryPresize会在初始化时定容，而initTable()并不会一次性定容、而是要等到put时扩）
+    - -> putVal的addCount里超过阈值也会触发扩容
+
 
 
 # 自动化测试框架
@@ -682,7 +687,7 @@ Action:
   -  -> 单一职责, 各司其职, 队列缓冲, 池子
 
 - 3.阻塞队列 -> drainTo -> 批量处理 -> 再返回结果 
-  -  -> 阻塞队列, 并发编程的经典数据结构, 分布式号段, 任务编排, pipeline流水线作业都依靠它
+  -  -> 阻塞队列, 并发编程的经典数据结构, 分布式号段, 任务编排（ThreadPoolExecutor）都依靠它， golang的channel也是一种类似的阻塞队列， 可以完成多阶段的pipeline流水线作业
   -  -> 一次加锁, 批量取出, 大幅降低锁竞争和上下文切换
   -  -> 如果条数少则攒一批, 如果条数多则需要拆成"最大允许批次"/否则包会大/容易丢
 
