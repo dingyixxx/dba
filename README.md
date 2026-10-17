@@ -544,7 +544,7 @@ Action:
    -  -> if (nextTab == null)Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n << 1];
    -  -> advance 是否可以继续推进i来认领区间，先进入cas分支得到bound和i，后面就会进到--i>=bound而不是进入cas分支
    -  -> finishing 是否进入搬完桶了、提交前复查
-   -  -> 认领区间：每个线程通过CAS TRANSFERINDEX从高位往低位认领[bound, i) 区间（至少16个槽位）
+   -  -> 认领区间：每个线程通过CAS TRANSFERINDEX“从高位往低位”认领[bound, i) 区间（至少16个槽位）
    -  -> 迁移桶：空桶放 ForwardingNode，已迁移跳过，非空桶加锁拆分链表/红黑树（牢牢锁住）
    -  -> 依然很保守地在加锁后，再一次判断了if (tabAt(tab, i) == f)
    -  -> 最后 setTabAt(tab, i, fwd)
@@ -656,6 +656,28 @@ Action:
     - -> putAll也会调用tryPresize，毕竟是传入了一个全新的大map（顺便地，此时的tryPresize会在初始化时定容，而initTable()并不会一次性定容、而是要等到put时扩）
     - -> putVal的addCount里超过阈值也会触发扩容
 
+- 46.tryPresize函数里，为什么要判断int rs = resizeStamp(n);？
+    - -> 因为，ConcurrentHashMap的一个精华是“协助扩容”
+    - -> 既然是“协助扩容”了，那么，多线程扩容时，怎么保证“一致性”呢
+    - -> 答案就是“扩容戳”，只要老数组长度n一样，那么，就是一致的
+
+- 47.tryPresize这个函数，进入transfer(tab, nt)协助扩容之前的判断条件，哪几个判断条件，是历史遗留bug？
+    - -> sc == rs + 1 ||sc == rs + MAX_RESIZERS这两个条件永远不可能成立，死代码
+    - -> 只有(sc >>> RESIZE_STAMP_SHIFT) != rs 这个条件可能成立
+
+- 48.tryPresize里第一个扩容的线程，else if (U.compareAndSwapInt(this, SIZECTL, sc,(rs << RESIZE_STAMP_SHIFT) + 2))
+    - -> 经此cas，SIZECTL一定是负数，而且是一个负得非常大的一个数
+
+- 49.为什么sizeCtl第一次扩容+2，后续都+1？
+    - -> 因为，要额外在“本轮迁移结束后”，再追加一次“我是不是最后一个完成迁移的线程”，如果是，那再依次过一遍[0,n-1]来兜底，看有之前的线程有没有漏迁移的，-2可能比-1更可读性好一些？
+```
+     if ((sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT)
+                        return;
+                    finishing = advance = true;
+                    i = n; // recheck before commit
+```
+
+- 50.
 
 
 # 自动化测试框架
