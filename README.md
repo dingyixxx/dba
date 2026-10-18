@@ -238,7 +238,7 @@ addWorker才能走下去
 - 3.sizeCtl 是个多功能字段：
    -  -> = 0（默认）：还没初始化, initTable 时用默认 16。
    -  -> > 0：来自构造函数指定的初始容量, 或初始化后表示扩容阈值（threshold）。
-   -  -> = -1：有线程正在初始化。initTable里面的判断else if (U.compareAndSwapInt(this, SIZECTL, sc, -1))
+   -  -> = -1：有线程正在初始化。initTable和tryPresize里面的判断else if (U.compareAndSwapInt(this, SIZECTL, sc, -1))
    -  -> < -1：有线程正在扩容（用 resizeStamp 编码, resize()/transfer时）。
 
 
@@ -455,7 +455,7 @@ Action:
 - 26.红黑树-删除（看兄弟xpl/xpr和近侄、远侄；删除后，根必须为黑）
    -  -> 删红：通常结束
    -  -> 删黑：出现双重黑
-   -  -> 兄弟红：旋转+变色（兄弟可借1红孩子，旋转），制造黑兄弟（红兄弟变的），但尚未还债，还债还是靠远侄红
+   -  -> 兄弟红：旋转+变色（兄弟可借1红孩子，旋转），制造黑兄弟（红兄弟变的）。但尚未还债，还债还是靠远侄红
 ```
         P(B)                            S(B)
        /    \                          /    \
@@ -485,13 +485,13 @@ Action:
 ```
 
 ```
-        p(?)                       wl(B)
+        p(?)                       wl(?)
        /   \                      /     \
-    x(DB)   wl(B)      =>      p(?)     w(R)
-               \              /   \       \
-               w(R)        x(B)  wl(B)     wr(B)
+    x(DB)   wl(B)      =>      p(B)     w(R)
+               \              /            \
+               w(R)        x(B)           wr(B)
                  \
-                 wr(R)
+                 wr(B)
 ```
    -  -> 兄弟黑、远侄子红：旋转+变色，结束（用外侧红孩子旋转还债）
 ```
@@ -546,7 +546,7 @@ Action:
    -  -> if (nextTab == null)Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n << 1];
    -  -> advance 是否可以继续推进i来认领区间，先进入cas分支得到bound和i，后面就会进到--i>=bound而不是进入cas分支
    -  -> finishing 是否进入搬完桶了、提交前复查
-   -  -> 认领区间：每个线程通过CAS TRANSFERINDEX从高位往低位认领[bound, i) 区间（至少16个槽位）
+   -  -> 认领区间：每个线程通过CAS TRANSFERINDEX“从高位往低位”认领[bound, i) 区间（至少16个槽位）
    -  -> 迁移桶：空桶放 ForwardingNode，已迁移跳过，非空桶加锁拆分链表/红黑树（牢牢锁住）
    -  -> 依然很保守地在加锁后，再一次判断了if (tabAt(tab, i) == f)
    -  -> 最后 setTabAt(tab, i, fwd)
@@ -557,8 +557,8 @@ Action:
    -  -> 线程处理完自己认领的区间后，i 会递减到 < bound
    -  -> 且如果transferIndex <= 0 说明全局任务已分配完
    -  -> CAS TRANSFERINDEX 也抢不到新区间
-   -  -> 就会if (i < 0 || i >= n || i + n >= nextn)
    -  -> 线程作为最后一个搬桶的，搬完后，会尝试 CAS sizeCtl - 1
+   -  -> 就会if (i < 0 || i >= n || i + n >= nextn)
 
 
 - 33.addCount里，transfer(tab, nt)协助扩容时nt就是nextTable
@@ -653,6 +653,58 @@ Action:
 - 44.lastRun优化，为什么能省克隆？
     - -> 因为就是简单双向链表，所以直接引用了，不用克隆
 
+- 45.何时触发扩容？
+    - -> treeifyBin链表转红黑树之前tryPresize
+    - -> putAll也会调用tryPresize，毕竟是传入了一个全新的大map（顺便地，此时的tryPresize会在初始化时定容，而initTable()则不同、它并不会一次性定容、而是要等到put时扩）
+    - -> putVal的addCount里超过阈值也会触发扩容
+
+- 46.tryPresize函数里，为什么要判断int rs = resizeStamp(n);？
+    - -> 因为，ConcurrentHashMap的一个精华是“协助扩容”
+    - -> 既然是“协助扩容”了，那么，多线程扩容时，怎么保证“一致性”呢
+    - -> 答案就是“扩容戳”，只要老数组的长度n一样，那么，扩容戳就是一致的，就是同一轮扩容
+
+- 47.tryPresize这个函数，进入transfer(tab, nt)协助扩容之前的判断条件，哪几个判断条件，是历史遗留bug？
+    - -> sc == rs + 1 ||sc == rs + MAX_RESIZERS这两个条件永远不可能成立，死代码
+    - -> 只有(sc >>> RESIZE_STAMP_SHIFT) != rs 这个条件可能成立
+
+- 48.tryPresize里第一个扩容的线程，else if (U.compareAndSwapInt(this, SIZECTL, sc,(rs << RESIZE_STAMP_SHIFT) + 2))
+    - -> 经此cas，SIZECTL一定是负数，而且是一个负得非常大的一个数
+
+- 49.为什么sizeCtl第一次扩容+2，后续都+1？
+    - -> 因为，要额外在“本轮迁移结束后”，再追加问一次“我是不是最后一个完成迁移的线程”，如果是，那再依次过一遍[0,n-1]来兜底，看有之前的线程有没有漏迁移的，-2可能比-1更可读性好一些？
+```
+     if ((sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT)
+                        return;
+                    finishing = advance = true;
+                    i = n; // recheck before commit
+```
+
+- 50.为什么说“协助扩容”是精华？
+    - -> 不只是“多线程搬数据”，更关键是它把几件事解耦得很好
+    - -> 任务分配：靠 transferIndex + CAS
+    - -> 桶级互斥：靠 synchronized(f)
+    - -> 进度标记：靠 ForwardingNode
+    - -> 扩容结束判定：靠 sizeCtl 的线程计数
+    - -> 读写不阻塞：读遇到 ForwardingNode 转发到新表
+    - -> 读写不阻塞：写遇到则可能先协助迁移
+    - -> 它没有追求“完全无锁”，而是让读尽量无锁、写尽量细粒度锁、扩容尽量并行化。
+
+- 51.TreeBin和TreeNode有什么区别？
+    - -> 链表超长（≥8）且容量 ≥64 时链表转红黑树
+    - -> TreeBin 只是一个"空壳"，并用 hash=-2 让所有“读写代码”识别"这桶是树"
+    - -> 每个元素从 LinkedNode 升级为 TreeNode（多了树指针，仍保留链表指针可逆）
+    - -> 而桶的头位置被替换为一个不存数据的 TreeBin（hash=-2）
+    - -> TreeBin持有树的 root、承担加锁、旋转平衡、find() 无锁查找和扩容拆桶等"管理器"职责。
+    - -> get 遇到负 hash 就交给 TreeBin.find() 走树查找。
+
+- 52.TreeBin的find
+    - -> 如果，WAITER有写线程在等待|WRITER正在写，那么就读降级，不再放新读者进树，退化为走链表查找
+    - -> 否则，走TreeNode的findTreeNode
+
+- 53.get也有一条快路径，没走通再走慢路径：树就按照树的找法，链表就按照链表的找法。
+
+
+
 
 
 # 自动化测试框架
@@ -684,7 +736,7 @@ Action:
   -  -> 单一职责, 各司其职, 队列缓冲, 池子
 
 - 3.阻塞队列 -> drainTo -> 批量处理 -> 再返回结果 
-  -  -> 阻塞队列, 并发编程的经典数据结构, 分布式号段, 任务编排, pipeline流水线作业都依靠它
+  -  -> 阻塞队列, 并发编程的经典数据结构, 分布式号段, 任务编排（ThreadPoolExecutor）都依靠它， golang的channel也是一种类似的阻塞队列， 可以完成多阶段的pipeline流水线作业
   -  -> 一次加锁, 批量取出, 大幅降低锁竞争和上下文切换
   -  -> 如果条数少则攒一批, 如果条数多则需要拆成"最大允许批次"/否则包会大/容易丢
 
