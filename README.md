@@ -30,7 +30,9 @@
 <video src="https://github.com/user-attachments/assets/f5919505-905a-437b-8013-196456476f1d" controls width="800">
 </video>
 
-
+# 关键字
+## synchronized
+- 抢锁失败：线程进入 _cxq( LIFO 头插), 释放锁：_cxq 迁移到 _EntryList
 
 
 # 源码赏析
@@ -92,7 +94,7 @@ private void setHead(Node node) {
 
 - 18.shouldParkAfterFailedAcquire 依次跳过已取消状态的前任, 找到上一个存续的前驱, 告诉它一定要唤醒作为后继节点的我
 
-
+- 19.冷知识, tryLock无参版即使在是公平锁的情况下, 也会上去就抢.
 
 
 
