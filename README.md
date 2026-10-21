@@ -35,7 +35,7 @@
 - 抢锁失败：线程进入 _cxq( LIFO 头插), 释放锁：_cxq 迁移到 _EntryList
 
 
-# 源码赏析
+# 源码赏析 Doug Lea真是厉害死了
 
 ## AQS
 - 1.addWaiter为什么要把enq(node)单独拆出来一个方法,是为了优先处理一次大多数的pred不为null的场景
